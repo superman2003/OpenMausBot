@@ -4202,11 +4202,17 @@ function updateGroupGoalRunProgress(operation: GroupTurnOperation, detail: strin
 type GroupMemberBotAvailability = "ready" | "busy" | "unavailable" | "cancelled" | "timed_out";
 type GroupMemberBotWaitResult = Exclude<GroupMemberBotAvailability, "busy">;
 
+function roomMemberThreadBusy(botId: string, threadId: string): boolean {
+  return roomMemberLock.heldElsewhere(botId, threadId) ||
+    [...groupSpeakers].some(([otherThreadId, speaker]) => speaker.botId === botId && otherThreadId !== threadId) ||
+    botAtThreadCapacity(botId);
+}
+
 function groupMemberBotAvailability(botId: string, operation: GroupTurnOperation): GroupMemberBotAvailability {
   if (operation.cancelled || operation.cancellation.signal.aborted) return "cancelled";
   const bot = store.bot(botId);
   if (!bot || bot.hidden) return "unavailable";
-  if (bot.busy || roomMemberLock.heldElsewhere(botId, operation.threadId)) return "busy";
+  if (roomMemberThreadBusy(botId, operation.threadId)) return "busy";
   return "ready";
 }
 
@@ -9674,8 +9680,7 @@ async function runClaimedGroupMemberTurn(
     onDispatchError?.(message);
     return true;
   }
-  // One turn per bot across 1:1 and rooms: the last-line guard for a 1:1 that re-claimed the bot after the member wait settled.
-  if (bot.busy) {
+  if (roomMemberThreadBusy(botId, threadId)) {
     if (orchestration) {
       orchestration.result.outcome = "busy";
       return true;
@@ -9892,7 +9897,7 @@ async function runClaimedGroupMemberTurn(
     reportDispatchError(message);
     return true;
   }
-  if (readyBot.busy) {
+  if (roomMemberThreadBusy(botId, threadId)) {
     if (orchestration) {
       orchestration.result.outcome = "busy";
       return true;
