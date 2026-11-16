@@ -331,6 +331,10 @@ export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
   ).run(followup.id, followup.kind, followup.ownerId, followup.threadId, followup.payload.sendId ?? null, JSON.stringify(followup.payload)));
 }
 
+export function recordChatFollowupRow(id: string, rowId: string): void {
+  writeFollowups(connection => connection.prepare("UPDATE chat_followups SET payload = json_set(payload, '$.rowId', ?) WHERE id = ? AND status = 'pending'").run(rowId, id));
+}
+
 /** Cancellation tombstones remain so a retried sendId cannot resurrect a dispatch. */
 export function settleChatFollowups(ids: string[], status: FollowupStatus | null): void {
   if (!ids.length) return;

@@ -1,8 +1,5 @@
-// Follow-ups sent while a channel works stay off the transcript until it settles, so the current responder cannot appear
-// to answer words it never saw.
-
 import { newId } from "./contracts.ts";
-import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
+import { chatFollowups, recordChatFollowupRow, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
 import { drainCoalesceHead, DRAIN_COALESCE_MAX_ITEMS } from "./admission.ts";
 import type { ResolvedSender } from "../shared/wire.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
@@ -10,6 +7,7 @@ import type { RoomPick } from "./room-pointed.ts";
 
 export interface ChannelQueueItem {
   id: string;
+  rowId?: string;
   text: string;
   replyToId?: string;
   sendId?: string;
@@ -69,6 +67,7 @@ export function queueChannelMessage(
     reaction?: string;
     mentions?: string[];
     pointed?: RoomPick;
+    record?: (queueId: string) => string;
   } = {},
 ): QueuedChannelMessage {
   const entry = queues.get(threadId) ?? { groupId, items: [] };
@@ -88,6 +87,10 @@ export function queueChannelMessage(
     queuedAt: Date.now(),
   };
   saveChatFollowup({ id: item.id, kind: "channel", ownerId: groupId, threadId, payload: item });
+  if (options.record) {
+    item.rowId = options.record(item.id);
+    recordChatFollowupRow(item.id, item.rowId);
+  }
   entry.items.push(item);
   queues.set(threadId, entry);
   return { id: item.id };
@@ -113,11 +116,19 @@ export function channelQueueItem(groupId: string, queueId: string): { threadId: 
 }
 
 export function cancelChannelMessage(groupId: string, queueId: string): boolean {
+  return removeChannelMessage(groupId, queueId, "cancelled");
+}
+
+export function completeChannelMessage(groupId: string, queueId: string): boolean {
+  return removeChannelMessage(groupId, queueId, null);
+}
+
+function removeChannelMessage(groupId: string, queueId: string, status: "cancelled" | null): boolean {
   for (const [threadId, entry] of queues) {
     if (entry.groupId !== groupId) continue;
     const items = entry.items.filter((item) => item.id !== queueId);
     if (items.length === entry.items.length) continue;
-    settleChatFollowups([queueId], "cancelled");
+    settleChatFollowups([queueId], status);
     if (items.length === 0) queues.delete(threadId);
     else queues.set(threadId, { groupId, items });
     return true;

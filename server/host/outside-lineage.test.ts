@@ -31,6 +31,16 @@ function world(over: Partial<OutsideLineageDeps> = {}) {
 const webhookRun = (threadId: string, more: Partial<RoutineRun> = {}) => ({ id: "run-1", routineId: "hook", routineName: "Inbox", botId: "bot", threadId, status: "running", triggerSource: "webhook", ...more }) as RoutineRun;
 
 describe("work from outside stays with that work", () => {
+  it("keeps a guest's room work confined when the owner chats alongside it", () => {
+    const w = world({ team: false, ownerPerson: person => person === "owner" });
+    w.rooms.add("chat");
+    w.lines.set("chat", [
+      { role: "user", sender: { id: "guest" } },
+      { role: "user", sender: { id: "owner" }, workChat: true },
+    ]);
+    expect(w.lineage.cloudGuestDriven("chat")).toBe(true);
+  });
+
   it("keeps a conversation confined after its run has ended, for good", () => {
     const w = world();
     w.runs.set("hook-run", webhookRun("hook-run"));

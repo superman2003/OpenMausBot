@@ -252,13 +252,13 @@ export function FollowUpRow({ simple = false }: { simple?: boolean }) {
   const followUp = useFollowUpDefault();
   const key = alternateSendLabel(useSendKey());
   return (
-    <SettingRow title={t("settings.followUp.title")} subtitle={t(simple ? "settings.simple.followUp" : "settings.followUp.subtitle", { key })}>
+    <SettingRow title={t("settings.followUp.title")} subtitle={t(simple ? "settings.simple.followUp" : "settings.workChat.subtitle", { key })}>
       <Select size="sm" variant={simple ? "ghost" : "field"} className={simple ? undefined : "w-full max-w-[240px]"}
         value={followUp}
         aria-label={t("settings.followUp.title")}
         onChange={(event) => setFollowUpDefault(parseFollowUpDefault(event.target.value))}
       >
-        <option value="steer">{t("settings.followUp.steer")}</option>
+        <option value="steer">{t("composer.workChat.send")}</option>
         <option value="queue">{t("settings.followUp.queue")}</option>
       </Select>
     </SettingRow>

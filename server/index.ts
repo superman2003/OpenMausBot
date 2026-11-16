@@ -19,6 +19,8 @@ import { compactBudget, compactionReading, contextWindowFor, shouldCompact } fro
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
 import { createRoomTranscript, GROUP_CONTEXT_MESSAGES } from "./host/room-transcript.ts";
+import { createWorkConversations } from "./host/work-conversations.ts";
+import { appendRoomRequest } from "./host/room-messages.ts";
 import { createRoomSessions } from "./host/room-sessions.ts";
 import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerOperation } from "./shared-computers.ts"; import { lentScreenResult } from "./lent-screen-guidance.ts"; import { DeviceLinks } from "./device-links.ts"; import { createLentMcp, isLentMcpPath } from "./lent-mcp.ts";
 import { cloudHomeLendingRefusal, cloudHomeOwnTurnRefusal, createCloudRoutineAuthors, ownerOnlyConversation } from "./cloud-lending.ts"; import { createOwnHome, selfHostedPersonName } from "./own-home.ts"; import { createPlacesElsewhere } from "./places-elsewhere.ts"; import { createPlacesElsewhereRoutes } from "./routes/places-elsewhere.ts"; import { assertRoomFolder } from "./room-folder.ts"; import { cloudConnectedAppsBrokerUrl, startCloudHomeConnectedApps, stopCloudHomeConnectedApps } from "./cloud-connected-apps.ts"; import { createTeamConnectionsHost } from "./host/team-connections-host.ts"; import { createCloudLendingTurns } from "./host/cloud-lending-turns.ts"; import { createTeamConnectionRoutes } from "./routes/team-connections.ts";
@@ -886,7 +888,7 @@ function threadPersonKey(threadId: string): string | undefined {
   const owner = directRequestOwners.get(threadId);
   const request = owner?.messageId
     ? thread.find((message) => message.id === owner.messageId)
-    : thread.findLast((message) => message.role === "user");
+    : thread.findLast((message) => message.role === "user" && !message.workChat);
   return linePersonKey(request) ?? threadStarters.get(threadId);
 }
 
@@ -2265,6 +2267,7 @@ function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
 }
 
 async function interruptDirectThread(botId: string, threadId: string, cause?: string): Promise<void> {
+  workConversations.cancel(threadId);
   if (store.taskByThread(botId, threadId)?.activity === "parked.computer") store.setTaskActivity(botId, threadId, "idle");
   const requestOwner = directRequestOwners.get(threadId);
   if (requestOwner) {
@@ -4455,6 +4458,7 @@ function cancelGroupTurnOperations(
     detail: "Stopped by you.",
   },
 ) {
+  workConversations.cancel(threadId);
   if (outcome.byHarness) coordinator.cancelRoom(groupId, threadId, outcome.detail, "failed");
   else {
     stopParkedCards(threadId);
@@ -4585,7 +4589,7 @@ const DEFAULT_PAGE = 50;
 function guardedRequestSnapshot(botId: string, threadId: string, sendId: string) {
   if (!store.taskByThread(botId, threadId)) throw requestConflict("No such conversation for this bot");
   const activeLeafId = store.activeLeaf(threadId);
-  const messages = guardedRequestPath(store.messagesFor(threadId), activeLeafId, sendId);
+  const messages = guardedRequestPath(store.messagesFor(threadId), activeLeafId, sendId).filter((message, index) => index === 0 || !message.workChat);
   const messageId = messages[0].id;
   const owner = directRequestOwners.get(threadId);
   const busy = threadBusy(botId, threadId);
@@ -4619,8 +4623,8 @@ function settleTrackedRequest(threadId: string, incoming: ReadonlySet<string> = 
   if (!owner?.messageId || owner.stopped || !bot || threadBusy(bot.id, threadId) || coordinator.parkedDirect(threadId)) return;
   const newest = coordinator.newestRoot(threadId, owner.generations);
   if (newest && newest.status !== "completed") return;
-  const path = store.activePath(threadId).filter(message => !incoming.has(message.id));
-  const source = path.findLast(message => message.role === "user");
+  const path = store.activePath(threadId).filter(message => !incoming.has(message.id) && !message.workChat);
+  const source = path.findLast(message => message.role === "user" && !message.workChat);
   if (source?.id !== owner.messageId || source.requestCancelled || source.requestPending !== true) return;
   const messages = path.slice(path.indexOf(source) + 1);
   const terminal = messages.findLast(message => message.turnTerminal && message.role === "bot" && message.kind === "text");
@@ -5135,6 +5139,28 @@ const sideJobs = createSideJobs({
   log: (line) => console.log(line),
 });
 
+const workConversations = createWorkConversations({
+  store,
+  writer: (botId, threadId, trigger) => {
+    const bot = store.projectBotForTask(botId, threadId) ?? store.bot(botId);
+    const instance = runningTurnInstance(bot, threadId) ?? (bot ? registry.get(bot.modelSelection.instanceId) : null);
+    return instance ? sideJobs.text("work-conversation", botId, { instance, threadId, trigger, model: bot?.modelSelection.model }) : null;
+  },
+  roomBot: input => {
+    const room = store.group(input.groupId);
+    const members = room?.memberIds.flatMap(id => { const bot = store.bot(id); return bot && !bot.hidden && !roomHeld(room, id) && !botHolds.held(id) ? [bot] : []; }) ?? [];
+    return roomResponders(input.text, members, { kind: "mentions" }, input.mentions)[0] ?? members.find(bot => bot.id === groupSpeakers.get(input.threadId)?.botId) ?? members[0];
+  },
+  status: threadId => {
+    const room = store.groupByThread(threadId);
+    const bot = store.botByThread(threadId);
+    return room ? { working: groupThreadIsWorking(room.id, threadId), speaker: store.bot(groupSpeakers.get(threadId)?.botId ?? "")?.name, queue: publicGroupState({ ...room, threadId }).queue }
+      : { working: Boolean(bot && threadBusy(bot.id, threadId)), activity: bot && store.taskByThread(bot.id, threadId)?.activity, delegated: coordinator.outstandingFor(threadId).map(node => ({ bot: store.bot(node.botId)?.name, status: node.status })) };
+  },
+  notice: (threadId, kind) => serverLine(threadLanguage(threadId), kind === "queued" ? "server.workChat.queued" : "server.workChat.failed"),
+  settled: () => { drainQueuedSends(); drainQueuedChannelSends(); },
+});
+
 const aboutMeFacts = createAboutMe({ read: () => cfg.profile?.aboutMe ?? "", write: (aboutMe) => { saveConfig({ profile: { ...cfg.profile, aboutMe } }); Object.assign(cfg, loadConfig()); },
   changed: () => broadcast({ kind: "config", ...configStatus() }), today: () => memoryDate(), ...(CLOUD_TEAM ? { person: (layer: string, plan: Parameters<typeof teamHost.learnAbout>[1]) => teamHost.learnAbout(layer, plan) } : {}) });
 const personPreference = createPersonPreference<InternalCapability>({ team: Boolean(CLOUD_TEAM), aboutMe: aboutMeFacts, requester: actingPeople.requester, userStarted: (turn) => turnOrigin(turn).kind === "user", personName: teamHost.personName });
@@ -5189,7 +5215,7 @@ function captureTurnFor(threadId: string, turnId: string): CaptureTurn | null {
   const path = store.activePath(threadId);
   const replyAt = path.findLastIndex((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId);
   if (replyAt < 0) return null;
-  const asked = path.slice(0, replyAt).findLast((message) => message.role === "user" && message.kind === "text");
+  const asked = path.slice(0, replyAt).findLast((message) => message.role === "user" && message.kind === "text" && !message.workChat);
   if (!asked || asked.peerAsk) return null;
   return {
     person: extractTurnImages(asked.text ?? "").text,
@@ -6137,7 +6163,7 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     if (!bot || bot.computer === "off" || threadBusy(bot.id, threadId)) return giveUp();
     if (store.taskByThread(bot.id, threadId)?.surface !== selection.previousSurface) return giveUp();
     if (hasQueuedSteeredMessages(bot.id, threadId)) { giveUp(); drainQueuedSends(); return; }
-    if (selection.source && store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")?.id !== selection.source.id) return;
+    if (selection.source && store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text" && !message.workChat)?.id !== selection.source.id) return;
     store.patchTask(bot.id, threadId, { surface, surfaceSource: "auto" });
     const text = `The computer selection is now ${surfaceLabel(surface)}. Continue the ${selection.handoff ? "handed-off" : "user's original"} request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
     if (selection.handoff) directCoordinationSettlers.delete(generation!); /* the continuing turn owns the hand-off's result */ void startTurn(bot.id, text, selection.handoff ? { ...selection.handoff.opts, threadId, computerSelectionContinuation: true } : { threadId, userMessage: selection.source, computerSelectionContinuation: true, dataContext: selection.dataContext }).catch(error => {
@@ -6962,7 +6988,7 @@ function turnAnswers(threadId: string, opts?: {
   cardContinuation?: boolean; requestMessageId?: string; coordination?: { id: string };
   userMessage?: Message; excludeMessageIds?: string[]; peerAsk?: Message["peerAsk"];
 }): { incident: boolean; quiet: boolean } {
-  const path = store.activePath(threadId);
+  const path = store.activePath(threadId).filter(message => !message.workChat);
   let lines: Array<Pick<Message, "peerAsk" | "queueId">>;
   if (opts?.cardContinuation) {
     const node = opts.coordination && coordinator.node(opts.coordination.id);
@@ -7172,7 +7198,7 @@ function drainQueuedSendsNow() {
       }).catch(reject);
     }),
     // Provider completion can precede its dispatch promise: keep the queue until that exact handshake releases its claim.
-    (botId, threadId, head) => threadBusy(botId, threadId) || botAtThreadCapacity(botId, head.peerAsk ? undefined : threadId, Boolean(head.peerAsk)) || roomTurnHolds(activeGroupTurnForBot(botId), threadId, !head.peerAsk)
+    (botId, threadId, head) => workConversations.pending(threadId) || threadBusy(botId, threadId) || botAtThreadCapacity(botId, head.peerAsk ? undefined : threadId, Boolean(head.peerAsk)) || roomTurnHolds(activeGroupTurnForBot(botId), threadId, !head.peerAsk)
       || directRootQueued(threadId) || (!head.peerAsk?.incident && parksBehindCoordination(botId, threadId)),
   );
 }
@@ -7284,6 +7310,10 @@ async function acceptDirectSend(
       if (typedStop) return typedStop;
       if (currentAtStart.busy) {
         const personsOwn = personPresent && !app && (trigger.kind === "user" || trigger.kind === "owner"), queuedPrompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))); if (runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id)) === "queue") return { ok: true as const, queued: true as const, threadId, queueId: queueSteeredMessage(currentAtStart.id, threadId, text, { replyToId: replyTo?.id, sendId, dataContext, fromApp: app?.fromApp, mentions, prompt: queuedPrompt, sender, trigger, via, callId, first: personPresent && Boolean(sender?.id) }).id };
+        if (input.converse && !app && !dataContext && !via && !/<attached-(?:image|file)\b/.test(text) && followUp !== "queue" && followUp !== "restart") {
+          const message = workConversations.direct(input, queuedPrompt);
+          if (message) return { ok: true, threadId, message };
+        }
         const instance = runningTurnInstance(currentAtStart, threadId);
         let steered: SteerOutcome = "refused";
         const steerInput = extractTurnImages(text);
@@ -7709,7 +7739,7 @@ async function beginTurn(
   }
   const setupLine = takeSetupRequest(store, { botId: bot.id, threadId, line: userMessage, person: personLine, editedFrom: opts?.editedMessageId, mounted: instance.adapter.capabilities.agentsMcp === true }); if (setupLine) { userMessage = setupLine; providerText = setupTurnText(setupLine, usesNativeImageInput); } if (route.quickModel && !opts?.cardContinuation && userMessage.quickModel !== route.quickModel) userMessage = store.patchMessage(threadId, userMessage.id, { quickModel: route.quickModel }) ?? userMessage;
   const recoveryUserMessageId = opts?.coordination
-    ? store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text")?.id
+    ? store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text" && !m.workChat)?.id
     : userMessage.id;
   if (opts?.trigger) turnTriggers.set(threadId, opts.trigger);
   if (!opts?.cardContinuation) {
@@ -7754,7 +7784,7 @@ async function beginTurn(
   const notesRefused = CLOUD_PERSONAL && cloudHomeOwnTurnRefusal(cloudLendingTurn({ botId, threadId, generation: dispatchClaimId })) !== null;
   if (notesRefused) noteForeignTurn(botId, threadId, dispatchClaimId);
   // An unknown control-plane wake must never acquire authority by guessing the latest user as its origin.
-  const pendingSource = requestMessageId ?? store.activePath(threadId).findLast(message => message.role === "user")?.id;
+  const pendingSource = requestMessageId ?? store.activePath(threadId).findLast(message => message.role === "user" && !message.workChat)?.id;
   if (pendingSource) store.patchMessage(threadId, pendingSource, { requestPending: true });
   const settleOutcome = opts?.coordination?.settle ?? opts?.onSettled;
   if (settleOutcome) directCoordinationSettlers.set(dispatchClaimId, { nodeId: opts?.coordination?.id ?? dispatchClaimId, settle: settleOutcome });
@@ -8582,7 +8612,7 @@ async function beginTurn(
           !directRequestOwners.get(threadId)?.stopped && !hasQueuedSteeredMessages(bot.id, threadId) &&
           JSON.stringify(current.modelSelection) === JSON.stringify(bot.modelSelection) &&
           (backup.instanceId !== instanceId || backup.model !== model) &&
-          store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text")?.id === recoveryUserMessageId) {
+          store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text" && !m.workChat)?.id === recoveryUserMessageId) {
         // No await between releasing the failed attempt and admitting its replacement: a newer send or Stop must never lose to a stale retry.
         store.setTaskActivity(bot.id, threadId, "idle");
         directTurnBots.delete(threadId);
@@ -9593,7 +9623,7 @@ const { quotaSwitch, harnessCardOutcome } = createQuotaSwitchHost({ store, coord
 
 function roomTurnBrief(threadId: string, bot: BotRecord, hop: number, latestUser: Message | undefined): string {
   const mention = hop > 0
-    ? [...store.activePath(threadId)].reverse().find((m) => m.role === "bot" && m.kind === "text" && Boolean(m.text) && m.from !== undefined && m.from.botId !== bot.id)
+    ? [...store.activePath(threadId)].reverse().find((m) => m.role === "bot" && m.kind === "text" && !m.workChat && Boolean(m.text) && m.from !== undefined && m.from.botId !== bot.id)
     : undefined;
   if (mention?.from) return `Mentioned by ${mention.from.name} (hop ${hop}): ${mention.text ?? ""}`;
   return latestUser?.text ?? "";
@@ -9749,7 +9779,7 @@ async function runClaimedGroupMemberTurn(
     integrations.hooks = hooksIntegration(bot.id, threadId, internalGeneration);
   }
   const latestUser = [...store.activePath(threadId)].reverse().find(
-    (message) => message.role === "user" && message.kind === "text" && message.text,
+    (message) => message.role === "user" && message.kind === "text" && message.text && !message.workChat,
   );
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
   // A drained burst runs as one turn: recover its lines by queueId, not position.
@@ -9779,6 +9809,7 @@ async function runClaimedGroupMemberTurn(
         ]
       : undefined,
     bot.id,
+    operation?.queuedQueueIds,
   );
   const roomContext = roomWindow.text;
   const turnImages = usesNativeImageInput ? [...burstImages, ...resolvedLatestImages.images, ...await videoFramesWithin(burstImages.length + resolvedLatestImages.images.length, resolvedLatestImages.videos)] : [];
@@ -10752,52 +10783,11 @@ function startGroupTurn(
     ? (() => {
         const before = store.messagesFor(threadId);
         const narration = roomTurnNarrationIds(before);
-        return before.filter((m) => m.kind === "text" && m.text && !narration.has(m.id)).slice(-GROUP_CONTEXT_MESSAGES);
+        return before.filter((m) => m.kind === "text" && m.text && !m.workChat && !narration.has(m.id)).slice(-GROUP_CONTEXT_MESSAGES);
       })()
     : [];
   const queuedGroup = options.queuedGroup;
-  const message = queuedGroup && queuedGroup.length > 0
-    ? (() => {
-        for (const item of queuedGroup.slice(0, -1)) {
-          store.appendMessage(threadId, {
-            role: "user",
-            kind: "text",
-            text: item.text,
-            replyToId: item.replyToId,
-            reaction: item.reaction,
-            sendId: item.sendId,
-            channelMode: item.mode,
-            queueId: item.id,
-            via: item.via,
-            sender: item.sender, ...(item.pointed ? { pointed: item.pointed.refs } : {}),
-          });
-        }
-        const last = queuedGroup[queuedGroup.length - 1]!;
-        return store.appendMessage(threadId, {
-          role: "user",
-          kind: "text",
-          text: last.text,
-          replyToId: replyTo?.id,
-          reaction: last.reaction,
-          sendId: last.sendId,
-          channelMode: last.mode,
-          queueId: last.id,
-          via: last.via,
-          sender: last.sender, ...(last.pointed ? { pointed: last.pointed.refs } : {}),
-        });
-      })()
-    : store.appendMessage(threadId, {
-        role: "user",
-        kind: "text",
-        text,
-        replyToId: replyTo?.id,
-        reaction: replyTo?.reactedWith,
-        sendId,
-        channelMode,
-        queueId,
-        via: options.via,
-        sender: options.sender, ...(options.pointed ? { pointed: options.pointed.refs } : {}),
-      });
+  const message = appendRoomRequest(store, { threadId, text, replyTo, sendId, channelMode, queueId, options });
   if (options.trigger) turnTriggers.set(threadId, options.trigger);
   const titled = group.dm ? null : store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
   const snippet = titled?.title;
@@ -10977,7 +10967,7 @@ function drainQueuedChannelSends(): void {
 }
 function drainQueuedChannelSendsNow(): void {
   drainChannelMessages(
-    (groupId, threadId) => groupThreadIsWorking(groupId, threadId),
+    (groupId, threadId) => workConversations.pending(threadId) || groupThreadIsWorking(groupId, threadId),
     ({ groupId, threadId, items }) => {
       const group = store.group(groupId);
       const ownsThread = group?.dm
@@ -12242,6 +12232,7 @@ ROUTES.push(createChannelRoutes({
   resolveReplyTarget,
   runningTurnInstance,
   startGroupTurn, engineSteersImages,
+  startRoomConversation: workConversations.room,
   applyRoomHoldsFromMessage,
   cancelGroupTurnOperations,
   drainQueuedChannelSends,
@@ -12854,7 +12845,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const minted = store.bot(parsed.data.botId)!;
         const threadId = parsed.data.threadId;
         const owner = connectorThread(minted.id, threadId);
-        const latestUser = [...store.activePath(threadId)].reverse().find((message) => message.role === "user" && message.kind === "text" && message.text);
+        const latestUser = [...store.activePath(threadId)].reverse().find((message) => message.role === "user" && message.kind === "text" && message.text && !message.workChat);
         const opener = handoffOpener({ botId: minted.id, threadId }, threadId);
         coordinator.beginTurn({
           id: generation, address: { botId: minted.id, threadId, ...(owner?.group ? { groupId: owner.group.id } : {}) }, brief: latestUser?.text ?? "",
@@ -13438,7 +13429,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         return json(res, 201, proposed);
       }
-      if (await dispatchRoutes([createBurstProposalRoutes({ requireActive: requireActiveInternalCapability, readBody: readInternalBody, refusal: () => burstProposalRefusal({ owner: connectorThread(internalSender.id, internalCapability.threadId), outside: outsideWorkStaysHere(internalCapability.threadId), self: selfThreadRefusal({ handoff: Boolean(internalCapability.roomHandoffId), requestLine: store.activePath(internalCapability.threadId).findLast((line) => line.role === "user" && line.kind === "text") }) }), model: () => burst.model(internalSender, internalCapability.threadId), propose: (plan) => burst.propose({ ...plan, botId: internalSender.id, threadId: internalCapability.threadId }) }), createInternalChiefTeamRoutes({ bot: () => store.bot(internalCapability.botId), requireActive: requireActiveInternalCapability,
+      if (await dispatchRoutes([createBurstProposalRoutes({ requireActive: requireActiveInternalCapability, readBody: readInternalBody, refusal: () => burstProposalRefusal({ owner: connectorThread(internalSender.id, internalCapability.threadId), outside: outsideWorkStaysHere(internalCapability.threadId), self: selfThreadRefusal({ handoff: Boolean(internalCapability.roomHandoffId), requestLine: store.activePath(internalCapability.threadId).findLast((line) => line.role === "user" && line.kind === "text" && !line.workChat) }) }), model: () => burst.model(internalSender, internalCapability.threadId), propose: (plan) => burst.propose({ ...plan, botId: internalSender.id, threadId: internalCapability.threadId }) }), createInternalChiefTeamRoutes({ bot: () => store.bot(internalCapability.botId), requireActive: requireActiveInternalCapability,
         teams: teamSetupTeams, bots: () => store.bots, instances: () => registry.describe() }), createInternalModelRoutes({ requireActive: requireActiveInternalCapability, menu: (search) => ownThreads.menu(internalCapability.botId, internalCapability.threadId, search) })], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/team-setup-requests") {
         const parsed = z.object({ fromBotId: z.string().optional(), fromThreadId: z.string().optional(), plan: z.unknown() }).strict().safeParse(await readInternalBody());
@@ -14034,7 +14025,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const sourceTitle = owner.group ? owner.group.name : (store.taskByThread(from.id, fromThreadId)?.title ?? "");
         const picked = body.modelSelection === undefined ? null : checkedModelSelection(body.modelSelection, undefined, true); const refused = !picked ? null : target.id !== from.id ? "model_selection is only for threads on yourself" : !picked.ok ? picked.error : ownThreads.refusal(picked.selection, from); if (refused) return json(res, 400, { error: refused });
-        if (target.id === from.id) { const selfRefused = selfThreadRefusal({ handoff: Boolean(internalCapability.roomHandoffId), requestLine: store.activePath(fromThreadId).findLast((line) => line.role === "user" && line.kind === "text") }); if (selfRefused) return json(res, 409, { error: selfRefused });
+        if (target.id === from.id) { const selfRefused = selfThreadRefusal({ handoff: Boolean(internalCapability.roomHandoffId), requestLine: store.activePath(fromThreadId).findLast((line) => line.role === "user" && line.kind === "text" && !line.workChat) }); if (selfRefused) return json(res, 409, { error: selfRefused });
           const inherited = picked?.ok ? { modelSelection: picked.selection, approvalMode: undefined } : ownThreads.inherited(from.id, fromThreadId);
           if (body.reportBack === true) { if (owner.group) return json(res, 400, { error: "report_back works only from your own conversation, not a room. Leave it out; the thread's result then stays in that thread." });
             const result = await coordinateBots({ botIds: [from.id], message, rework: false, thread: "new", reply: "resume", consult: false, title, projectId, ownThread: inherited }), receipt = (result.body.receipts as PeerDeliveryReceipt[] | undefined)?.[0];

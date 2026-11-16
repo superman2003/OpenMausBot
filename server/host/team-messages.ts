@@ -122,7 +122,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
   function askerOf(threadId: string): Person | undefined {
     const member = audienceMember(deps.audienceOf(threadId));
     if (member) return byKey(member);
-    return byKey(store.activePath(threadId).findLast((message) => message.role === "user" && !message.peerAsk && message.sender?.id)?.sender?.id);
+    return byKey(store.activePath(threadId).findLast((message) => message.role === "user" && !message.workChat && !message.peerAsk && message.sender?.id)?.sender?.id);
   }
 
   /** A teammate by name or address. Someone who left is found too, so the refusal can say so. */
@@ -188,7 +188,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     const to = found.person;
     const asker = askerOf(threadId);
     if (asker?.key === to.key) return { status: 400, text: `${to.name} is who you are talking with here: tell them in your reply.` };
-    const tagged = asker && store.activePath(threadId).findLast((line) => line.role === "user" && !line.peerAsk && line.sender?.id === asker.key);
+    const tagged = asker && store.activePath(threadId).findLast((line) => line.role === "user" && !line.workChat && !line.peerAsk && line.sender?.id === asker.key);
     if (tagged && inbox.reached(to.key, threadId, tagged.id)) {
       return { status: 200, text: `${asker!.name}'s line tagged ${to.name}, so it is already in ${to.name}'s inbox. Don't pass it on again.` };
     }

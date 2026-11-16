@@ -71,7 +71,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   function retryForRoom(bot: BotRecord, threadId: string, report: (retry?: IncidentRetry) => void): boolean {
     const continueRequest = deps.continueRequest;
     if (!continueRequest) return false;
-    const asked = store.activePath(threadId).findLast((line) => line.role === "user")?.id ?? "";
+    const asked = store.activePath(threadId).findLast((line) => line.role === "user" && !line.workChat)?.id ?? "";
     if (roomRetries.get(threadId) === asked) { report({ retried: true }); return true; }
     roomRetries.set(threadId, asked);
     if (roomRetries.size > 500) roomRetries.delete(roomRetries.keys().next().value!);
@@ -214,7 +214,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     const chiefRetries = Boolean(chief && !group && reachesChief(chief, bot, threadId));
     if (input.kind === "failed" && !group && !chiefRetries && memoryStopped(input.detail) && retryForRoom(bot, threadId, report)) return;
     if (!chief || !chiefRetries) return report();
-    const answered = store.activePath(threadId).findLast((line) => line.role === "user")?.text ?? "";
+    const answered = store.activePath(threadId).findLast((line) => line.role === "user" && !line.workChat)?.text ?? "";
     if (answered.startsWith(AUTO_RETRY_LEAD)) return report({ retried: true });
     if (input.kind !== "failed" || answered.startsWith(RETRY_LEAD) || !count.mayRetry || !retriesTeammateThread(input.detail, input.facts)) return report();
     const failedAt = Date.now();

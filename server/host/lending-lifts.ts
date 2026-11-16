@@ -106,7 +106,7 @@ export function createLendingLifts(deps: LendingLiftDeps) {
   function carryOn(botId: string, threadId: string, requestMessageId: string, since: number): void {
     if (!store.taskByThread(botId, threadId) || deps.stopped(threadId)) return;
     // Someone wrote since: they lead now.
-    if (store.activePath(threadId).findLast((message) => message.role === "user" && message.kind === "text")?.id !== requestMessageId) return;
+    if (store.activePath(threadId).findLast((message) => message.role === "user" && message.kind === "text" && !message.workChat)?.id !== requestMessageId) return;
     if (deps.threadBusy(botId, threadId) || deps.queued(botId, threadId)) {
       if (now() - since >= CARRY_ON_MS) return;
       (setTimer(() => carryOn(botId, threadId, requestMessageId, since), CARRY_ON_EVERY_MS) as { unref?: () => void }).unref?.();

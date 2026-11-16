@@ -10367,5 +10367,11 @@
   "remote.tailscale.needsApproval": "這台電腦正在等待你的 Tailscale 網路核准。請在 Tailscale 管理主控台中核准它，然後再試一次。",
   "together.switch.title": "這台電腦和 My Cloud 合在一起",
   "together.switch.line": "預設為關閉。Cloud 上的機器人和這台電腦上的機器人顯示在同一個清單中，各自在所在的位置開啟。",
-  "together.switch.failed": "無法儲存。請再試一次。"
+  "together.switch.failed": "無法儲存。請再試一次。",
+  "composer.workChat.placeholder": "{name} 正在工作，按 {key} 可繼續聊天，任務會繼續執行。",
+  "composer.workChat.send": "邊做邊聊",
+  "composer.workChat.hint": "先回覆你的訊息，{name} 繼續工作。新的執行要求會在目前任務結束後處理。",
+  "settings.workChat.subtitle": "邊做邊聊會另外回覆訊息，目前任務繼續執行。新的執行要求會在目前任務結束後處理。排入佇列則把訊息留到之後。按住 {key} 可對單則訊息臨時改用另一種方式。",
+  "server.workChat.queued": "這則執行要求已儲存，會在目前任務結束後處理。",
+  "server.workChat.failed": "暫時無法另外回覆。訊息已儲存，會在目前任務結束後處理；你也可以繼續傳訊息聊天。"
 }

@@ -84,7 +84,7 @@ export function createOutsideLineage(deps: OutsideLineageDeps) {
     if (deps.guestOpened(threadId)) return true;
     if (writer && !deps.ownerPerson(writer)) return true;
     if (!store.groupByThread(threadId)) return false;
-    const person = store.messagesFor(threadId).findLast((line) => line.role === "user" && !line.peerAsk && line.sender?.id)?.sender?.id;
+    const person = store.messagesFor(threadId).findLast((line) => line.role === "user" && !line.workChat && !line.peerAsk && line.sender?.id)?.sender?.id;
     return person !== undefined && !deps.ownerPerson(person);
   }
 

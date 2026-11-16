@@ -1,12 +1,12 @@
 import type { CSSProperties } from "react";
-import { ArrowUp, ChevronUp, Clock, CornerDownRight, RotateCcw } from "lucide-react";
+import { ArrowUp, ChevronUp, Clock, MessageCircle, RotateCcw } from "lucide-react";
 
 import type { FollowUp } from "../../shared/follow-up";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 
-const FOLLOW_UP_ICON = { steer: CornerDownRight, queue: Clock, restart: RotateCcw } as const;
+const FOLLOW_UP_ICON = { steer: MessageCircle, queue: Clock, restart: RotateCcw } as const;
 
 export interface FollowUpMenu {
   /** What Enter does first, then the other one where the turn can be steered, then restart. */
@@ -36,7 +36,7 @@ export function ComposerSendButton({ compact, waits, label, title, look, disable
       onClick={(event) => onSend(event.metaKey || event.ctrlKey)}
       disabled={disabled}
       aria-label={label}
-      title={menu && alternate ? t("composer.followUp.buttonTitle", { title, key: menu.alternateKey, alternate: t(`composer.followUp.${alternate}`) }) : title}
+      title={menu && alternate ? t("composer.followUp.buttonTitle", { title, key: menu.alternateKey, alternate: t(alternate === "steer" ? "composer.workChat.send" : `composer.followUp.${alternate}`) }) : title}
       style={waits ? undefined : look.style}
       className={cn(
         "flex shrink-0 items-center justify-center rounded-full disabled:cursor-default",
@@ -52,8 +52,8 @@ export function ComposerSendButton({ compact, waits, label, title, look, disable
     const Icon = FOLLOW_UP_ICON[choice];
     return {
       key: choice,
-      label: t(`composer.followUp.${choice}`),
-      subtitle: t(`composer.followUp.${choice}Hint`, { name: menu.name }),
+      label: t(choice === "steer" ? "composer.workChat.send" : `composer.followUp.${choice}`),
+      subtitle: t(choice === "steer" ? "composer.workChat.hint" : `composer.followUp.${choice}Hint`, { name: menu.name }),
       icon: <Icon size={16} aria-hidden="true" />,
       active: index === 0,
       value: index === 0 ? menu.sendKey : choice === alternate ? menu.alternateKey : undefined,

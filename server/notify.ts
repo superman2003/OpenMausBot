@@ -72,11 +72,11 @@ export function buildNotification(
 
 export function unaskedBotThread(
   task: { openedBy?: unknown } | undefined,
-  path: readonly { role: string; kind: string; at: number; peerAsk?: { incident?: unknown } }[],
+  path: readonly { role: string; kind: string; at: number; peerAsk?: { incident?: unknown }; workChat?: boolean }[],
   assignedAt?: number,
 ): boolean {
   if (!task?.openedBy) return false;
-  const asked = path.findLast((message) => message.role === "user" && message.kind === "text");
+  const asked = path.findLast((message) => message.role === "user" && message.kind === "text" && !message.workChat);
   if (!asked || (assignedAt !== undefined && asked.at < assignedAt)) return true;
   return Boolean(asked.peerAsk && !asked.peerAsk.incident);
 }

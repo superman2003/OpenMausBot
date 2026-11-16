@@ -67,8 +67,8 @@ export function forgetInNotes(botId: string, mentions: (text: string) => boolean
 }
 
 /** The person's own words started this turn: not another person's, not another bot's, not a room's. */
-export function ownersOwnAsk(path: ReadonlyArray<{ role: string; kind?: string; sender?: unknown; peerAsk?: unknown }>): boolean {
-  const asked = path.findLast((message) => message.role === "user" && message.kind === "text");
+export function ownersOwnAsk(path: ReadonlyArray<{ role: string; kind?: string; sender?: unknown; peerAsk?: unknown; workChat?: boolean }>): boolean {
+  const asked = path.findLast((message) => message.role === "user" && message.kind === "text" && !message.workChat);
   return Boolean(asked) && !asked!.sender && !asked!.peerAsk;
 }
 

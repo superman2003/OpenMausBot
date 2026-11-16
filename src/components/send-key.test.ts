@@ -222,9 +222,9 @@ describe("the send key in hints", () => {
 
     type(textarea(), "");
     render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
-    expect(textarea().placeholder).toBe("Pepper is working. Ctrl+Enter sends this into the running turn");
+    expect(textarea().placeholder).toBe("Pepper is working. Press Ctrl+Enter to chat while work continues.");
     render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [{ ...bot, modelSelection: { instanceId: "none", model: "x" } }] }));
-    expect(textarea().placeholder).toBe("Pepper is working. Ctrl+Enter queues your message");
+    expect(textarea().placeholder).toBe("Pepper is working. Press Ctrl+Enter to chat while work continues.");
   });
 
   it("names the key in Japanese hints too", () => {
@@ -233,7 +233,7 @@ describe("the send key in hints", () => {
     setLocale("ja");
     try {
       render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
-      expect(textarea().placeholder).toBe("Pepper が作業中です — Ctrl+Enter で実行中のターンに送ります");
+      expect(textarea().placeholder).toBe("Pepper は作業中です。Ctrl+Enter で、作業を続けながらチャットできます。");
     } finally {
       setLocale("en");
     }
@@ -277,7 +277,7 @@ describe("a message sent while a one-to-one bot works", () => {
       expect(sends().at(-1), JSON.stringify(init)).toMatchObject({ type: "send", text: "words", followUp });
     }
     type(textarea(), "clicked");
-    expect(sendButton().getAttribute("title")).toBe("Send into the running turn · Ctrl+Enter: Queue");
+    expect(sendButton().getAttribute("title")).toBe("Chat while working · Ctrl+Enter: Queue");
     flushSync(() => sendButton().click());
     type(textarea(), "ctrl-clicked");
     flushSync(() => sendButton().dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true })));
@@ -335,7 +335,7 @@ describe("a message sent while a one-to-one bot works", () => {
     type(textarea(), "start again with this");
     const choices = openChoices();
     expect(choices.map((choice) => choice.textContent)).toEqual([
-      "Steer nowInterrupt what Pepper is doingEnter",
+      "Chat while workingAnswer now while Pepper keeps working. New actions wait for the current work.Enter",
       "QueueRun after the current turnCtrl+Enter",
       "Restart turnStart the turn over with this message. Also stops work it handed to other bots",
     ]);
@@ -343,17 +343,18 @@ describe("a message sent while a one-to-one bot works", () => {
     expect(sends().at(-1)).toMatchObject({ type: "send", text: "start again with this", followUp: "restart" });
   });
 
-  it("always queues for a bot whose turn cannot be steered, and still offers restart", () => {
+  it("can chat beside a bot whose task cannot be steered, and still offers queue and restart", () => {
     fixture.instances = [cannotSteer];
     render(createElement(Composer, { bot: working }));
     type(textarea(), "a");
     press(textarea());
     type(textarea(), "b");
     press(textarea(), { ctrlKey: true });
-    expect(followUps()).toEqual(["queue", "queue"]);
+    expect(followUps()).toEqual(["steer", "queue"]);
     type(textarea(), "c");
     expect(openChoices().map((choice) => choice.textContent)).toEqual([
-      "QueueRun after the current turnEnter",
+      "Chat while workingAnswer now while Pepper keeps working. New actions wait for the current work.Enter",
+      "QueueRun after the current turnCtrl+Enter",
       "Restart turnStart the turn over with this message. Also stops work it handed to other bots",
     ]);
   });

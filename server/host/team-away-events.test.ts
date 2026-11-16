@@ -101,6 +101,15 @@ describe("what of a Team Cloud is worth an away email", () => {
     ]);
   });
 
+  it("sends completion to the task requester when another person chats alongside it", () => {
+    const { events, notified } = world({ room: [
+      { id: "request", role: "user", sender: { id: MAYA, name: "Maya" } },
+      { id: "chat", role: "user", sender: { id: BEN, name: "Ben" }, workChat: true },
+    ] });
+    notified(note({ kind: "done", threadId: "room", groupId: "g1" }), note({ kind: "done", threadId: "room", groupId: "g1" }));
+    expect(events[0]).toMatchObject({ person: MAYA, about: "done:room:request" });
+  });
+
   it("drops finished work once that person, not someone else, has read the conversation past the reply", () => {
     const read = new Set<string>();
     const asked = { room: [{ id: "u2", role: "user", sender: { id: MAYA, name: "Maya" } }] } as Record<string, Partial<Message>[]>;

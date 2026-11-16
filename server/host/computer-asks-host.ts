@@ -39,7 +39,7 @@ export function createComputerAsksHost(deps: ComputerAsksHostDeps) {
       if (!store.taskByThread(botId, threadId)) return true;
       if (deps.threadBusy(botId, threadId) || deps.queued(botId, threadId)) return false;
       // Someone wrote since the bot asked: they lead now.
-      if (store.activePath(threadId).findLast((message) => message.role === "user" && message.kind === "text")?.id !== requestMessageId) return true;
+      if (store.activePath(threadId).findLast((message) => message.role === "user" && message.kind === "text" && !message.workChat)?.id !== requestMessageId) return true;
       void deps.continueRequest(botId, text, { threadId, cardContinuation: true, requestMessageId }).catch((error: unknown) => {
         console.warn(`computer asks: the request could not go on: ${error instanceof Error ? error.message : String(error)}`);
       });

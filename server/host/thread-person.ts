@@ -13,6 +13,6 @@ export function createCardRequester(store: () => Pick<Store, "messagesFor">) {
     const card = thread[index]!;
     return linePersonKey(card.requestMessageId
       ? thread.find((message) => message.id === card.requestMessageId)
-      : thread.slice(0, index).findLast((message) => message.role === "user"));
+      : thread.slice(0, index).findLast((message) => message.role === "user" && !message.workChat));
   };
 }

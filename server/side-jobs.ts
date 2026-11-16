@@ -35,7 +35,7 @@ export function helperSelection(cfg: HelperConfig, env: Record<string, string | 
 }
 
 /** "representative": a person's assistant answering a teammate's question for them, which must never get tools. */
-export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative" | "status-reply";
+export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative" | "status-reply" | "work-conversation";
 
 export type SideJobInstance = Pick<ProviderInstance, "instanceId" | "driverKind" | "enabled" | "generateText" | "generateMemoryText" | "models" | "quickModelsUsable"> & {
   adapter: { capabilities: Pick<ProviderAdapter["capabilities"], "agentsMcp"> };
@@ -71,7 +71,7 @@ export interface SideJobsDeps {
 
 export interface SideJobs {
   /** Null when nobody can write it and the job keeps its fallback. `at.instance`: the conversation's engine, for the summary. */
-  text(job: SideJob, botId: string, at?: { instance?: SideJobInstance }): SideJobText | null;
+  text(job: SideJob, botId: string, at?: { instance?: SideJobInstance; threadId?: string; trigger?: UsageTrigger; model?: string }): SideJobText | null;
 }
 
 type TextCall = (prompt: string, options?: TextGenerationOptions) => Promise<string>;
@@ -123,10 +123,10 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
     };
 
   /** Every call checks the spend limit: one upkeep pass makes several in a row. */
-  const booked = (job: SideJob, bot: SideJobBot, instance: SideJobInstance, call: TextCall, trigger: UsageTrigger, fixed: () => TextGenerationOptions): SideJobText["generateText"] =>
+  const booked = (job: SideJob, bot: SideJobBot, instance: SideJobInstance, call: TextCall, trigger: UsageTrigger, fixed: () => TextGenerationOptions, conversationId?: string): SideJobText["generateText"] =>
     async (prompt, options) => {
       deps.assertWithinBudget();
-      const threadId = `${job}-${randomUUID()}`;
+      const threadId = conversationId ?? `${job}-${randomUUID()}`;
       return call(prompt, {
         ...options,
         ...fixed(),
@@ -191,6 +191,7 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
       if (job === "skill-review" && own.adapter.capabilities.agentsMcp !== true) return null;
       const call = ownCall(job, own);
       if (call) {
+        if (job === "work-conversation") return { via: "engine", generateText: booked(job, bot, own, call, at.trigger ?? { kind: "bot", botId: bot.id }, () => ({ fallback: ownFallback(bot, own), ...(at.model ? { model: at.model } : {}) }), at.threadId) };
         // The summary belongs to a turn that already passed the spend limit and is not booked on its own.
         if (job === "compaction") return { via: "engine", generateText: call };
         if (job === "setup-suggestions") {
@@ -200,7 +201,7 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
         }
         return { via: "engine", generateText: booked(job, bot, own, call, { kind: "bot", botId: bot.id }, () => ({ fallback: ownFallback(bot, own) })) };
       }
-      if (!helperModelAllowed(bot)) return null;
+      if (job === "work-conversation" || !helperModelAllowed(bot)) return null;
       const helper = usableHelper();
       if (!helper) return null;
       return { via: "helper", generateText: booked(job, bot, helper.instance, helper.call, { kind: "helper", botId: bot.id, job }, () => (helper.model ? { model: helper.model } : {})) };

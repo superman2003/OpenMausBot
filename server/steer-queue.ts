@@ -1,7 +1,5 @@
-// Mid-turn sends wait here off the transcript (else they become the active leaf mid-turn) and survive Stop: stop-then-steer is the feature.
-
 import { newId } from "./contracts.ts";
-import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
+import { chatFollowups, recordChatFollowupRow, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
 import { drainCoalesceHead } from "./admission.ts";
 import { spokenLineFields } from "./live-call-record.ts";
 import { workOriginSchema, type WorkOrigin } from "./peer-provenance.ts";
@@ -109,7 +107,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; record?: (queueId: string) => string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -136,6 +134,10 @@ export function queueSteeredMessage(
     ...(options.mentions?.length ? { mentions: options.mentions } : {}),
   };
   saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
+  if (options.record) {
+    item.rowId = options.record(id);
+    recordChatFollowupRow(id, item.rowId);
+  }
   // `first`: ahead of everything queued but the person's own messages sent before it; with `aheadOfOthers` (the person
   // whose request runs, where several people write), ahead of everyone else's too.
   const ahead = options.first ? entry.items.findIndex((other) => other.peerAsk !== undefined || other.unattended === true || other.queuedAt > item.queuedAt
@@ -210,7 +212,8 @@ export function drainSteeredMessages(
     changed();
     const appended: Message[] = [];
     for (const item of group) {
-      const recorded = item.rowId ? store.messagesFor?.(threadId).find((message) => message.id === item.rowId) : undefined;
+      const saved = store.messagesFor?.(threadId).find((message) => message.id === item.rowId || message.queueId === item.messageId && message.role === "user");
+      const recorded = saved?.workChat ? store.patchMessage(threadId, saved.id, { workChat: false }) : saved;
       appended.push(
         recorded ?? store.appendMessage(threadId, {
           role: "user",
@@ -282,11 +285,19 @@ export function queuedSteerSender(botId: string, threadId: string, queueId: stri
 }
 
 export function cancelSteeredMessage(botId: string, messageId: string, expectedThreadId?: string): boolean {
+  return removeSteeredMessage(botId, messageId, expectedThreadId, "cancelled");
+}
+
+export function completeSteeredMessage(botId: string, messageId: string, threadId: string): boolean {
+  return removeSteeredMessage(botId, messageId, threadId, null);
+}
+
+function removeSteeredMessage(botId: string, messageId: string, expectedThreadId: string | undefined, status: "cancelled" | null): boolean {
   for (const [threadId, entry] of queues) {
     if (entry.botId !== botId || (expectedThreadId !== undefined && threadId !== expectedThreadId)) continue;
     const items = entry.items.filter((item) => item.messageId !== messageId);
     if (items.length === entry.items.length) continue;
-    settleChatFollowups([messageId], "cancelled");
+    settleChatFollowups([messageId], status);
     if (items.length === 0) queues.delete(threadId);
     else queues.set(threadId, { botId: entry.botId, items });
     changed();

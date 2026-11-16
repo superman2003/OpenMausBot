@@ -30,6 +30,7 @@ import type { SkillReview } from "../skill-review.ts";
 import { assertWithinBudget } from "../spend.ts";
 import type { BotRecord, GroupRecord, GroupTaskPatch, Message, Store } from "../store.ts";
 import type { ThreadStarters } from "../thread-starters.ts";
+import type { RoomConversationInput } from "../host/work-conversations.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
@@ -75,6 +76,7 @@ export interface ChannelRouteDeps {
   updateChannel(groupId: string, value: unknown): GroupRecord;
   groupIsWorking(group: GroupRecord): boolean;
   groupThreadIsWorking(groupId: string, threadId: string): boolean;
+  startRoomConversation?(input: RoomConversationInput): Message | null;
   readCursor(threadId: string): { lastReadMessageId?: string };
   /** A person opened this room (a Team Cloud's Needs you lines for them there are done). */
   threadRead?(auth: RequestAuth, threadId: string): void;
@@ -357,6 +359,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
         return json(res, 400, { error: "body must be a JSON object" });
       }
       const textRefused = messageTextRefusal(body.text);
+      if (body.converse !== undefined && typeof body.converse !== "boolean") return json(res, 400, { error: "converse must be a boolean" });
       if (textRefused) return json(res, 400, { error: textRefused });
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
@@ -454,6 +457,10 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
           if (sameName) throw Object.assign(new Error(sameName), { status: 409 });
           if (channelMode === "chat" && !owners.stopRefusal(auth, threadId)) applyRoomHoldsFromMessage(current.id, text, mentions);
           const threadWorking = groupThreadIsWorking(current.id, threadId);
+          if (threadWorking && body.converse === true && channelMode === "chat" && !pick && !via && (auth.kind === "session" || DESKTOP_MANAGED || browserOrigin) && !/<attached-(?:image|file)\b/.test(text)) {
+            const message = deps.startRoomConversation?.({ groupId: current.id, threadId, text, replyTo, sendId, sender: messageSender(auth), trigger, mentions });
+            if (message) return { ok: true as const, threadId, message };
+          }
           const decision = admit("room", {}, { roomWorking: threadWorking, threadWorking });
           if (decision.action === "queue") {
             const queued = queueChannelMessage(current.id, threadId, text, {

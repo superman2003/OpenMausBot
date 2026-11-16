@@ -64,6 +64,24 @@ const GOLDEN = [
 ].join("\n");
 
 describe("the room transcript", () => {
+  it("keeps chat beside a task out of execution, then includes the saved instruction even beyond the recent window", () => {
+    const messages = [
+      row("instruction", { text: "Add captions", queueId: "queued-caption", workChat: true }),
+      row("chat-answer", { role: "bot", text: "We can discuss it while the task runs", workChat: true }),
+      ...Array.from({ length: 40 }, (_, n) => row(`result-${n}`, { role: "bot", text: `Work result ${n}` })),
+    ];
+    const before = transcript(messages).window("room", "User");
+    expect(before.text).not.toContain("Add captions");
+    expect(before.text).not.toContain("We can discuss");
+    messages[0]!.workChat = false;
+    const after = transcript(messages).window("room", "User", undefined, "editor", ["queued-caption"]);
+    expect(after.lines).toHaveLength(GROUP_CONTEXT_MESSAGES);
+    expect(after.lines[0]!.id).toBe("instruction");
+    expect(after.text).toContain("Add captions");
+    expect(after.text).not.toContain("We can discuss");
+    expect(after.lines.at(-1)!.id).toBe("result-39");
+  });
+
   it("renders the last window of a room as one member reads it", () => {
     const { text } = transcript(thread()).window("room", "Omkar", [{ messageId: "latest", text: "Use this frame" }], "editor");
     expect(text).toBe(GOLDEN);

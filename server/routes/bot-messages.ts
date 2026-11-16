@@ -208,6 +208,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (pageOpen && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can carry the page the person has open" });
       const followUp = parseFollowUp(body.followUp);
       if (followUp === null) return json(res, 400, { error: "followUp must be steer, queue or restart" });
+      if (body.converse !== undefined && typeof body.converse !== "boolean") return json(res, 400, { error: "converse must be a boolean" });
       const mentions = parseMentionPicks(body.mentions);
       if (mentions === null) return json(res, 400, { error: "mentions must be a list of up to 20 bot ids" });
       if (followUp && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can choose how it meets the running turn" });
@@ -342,6 +343,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
           personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
+          converse: body.converse === true && !guarded && !press && !appSent && (personPresent || typeof req.headers.origin === "string" && Boolean(req.headers.origin)),
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);

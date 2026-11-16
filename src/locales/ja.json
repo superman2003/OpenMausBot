@@ -1,4 +1,5 @@
 {
+  "composer.workChat.placeholder": "{name} は作業中です。{key} で、作業を続けながらチャットできます。",
   "connectedWorkspaces.localTitle": "このコンピューターの環境",
   "connectedWorkspaces.missing": "見つかりません",
   "connectedWorkspaces.current": "使用中",

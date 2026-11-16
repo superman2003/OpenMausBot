@@ -172,6 +172,10 @@ describe("unaskedBotThread", () => {
   const peer = (at: number) => ({ role: "user", kind: "text", at, peerAsk: {} });
   const reply = (at: number) => ({ role: "bot", kind: "text", at });
 
+  it("keeps a delegated task quiet when the person only chats alongside it", () => {
+    expect(unaskedBotThread(opened, [peer(1), { ...person(2), workChat: true }, reply(3)])).toBe(true);
+  });
+
   it("is quiet while the newest request in a bot-opened thread is a bot's", () => {
     expect(unaskedBotThread(opened, [])).toBe(true);
     expect(unaskedBotThread(opened, [peer(1), reply(2)])).toBe(true);

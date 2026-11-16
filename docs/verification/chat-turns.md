@@ -40,6 +40,36 @@ command without starting a turn.
 - A bot working inside a channel must be awaited through that channel.
 - `needs-user`, `failed`, and `stalled` are results, not successful settlement.
 
+## Chat while work continues
+
+The composer's normal send requests a separate conversation reply when the
+selected task is working. It uses that bot's own text engine, with no work
+tools, and reads a bounded snapshot of this conversation and its work state.
+Room members still take turns and later members read earlier results. Chat
+messages and replies stay out of those execution contexts.
+
+A conversational question starts no new task. An action request is saved
+durably and runs after the current work; the reply states that delay. Explicit
+Queue and Restart retain their existing meaning. Attachments, page picks and
+engines with no separate text capability keep the normal delivery path.
+An invalid, failed or timed-out reply also retains the message for the work
+queue. Stop cancels replies belonging to that exact conversation.
+
+```sh
+pnpm exec vitest run server/work-conversation.e2e.test.ts server/work-conversation.test.ts
+```
+
+The isolated fixture holds the first room member behind a file gate and checks
+that a question receives a provider reply before that gate opens. The second
+member starts only after the first result, which its prompt contains. A saved
+action runs once after both members finish, without a second user row. The
+fixture also checks replies and saved actions during a direct task, send-id
+retries, and context isolation. Its retained `.log.work-conversation.json`
+records the exact controls, state, transcripts and server log path. Unit cases
+cover scoped cancellation, late answers, invalid replies, timeouts, deleted
+conversations and older queued instructions outside the recent context window.
+This proves dispatch with fake engines, not the latency of a real provider.
+
 ## Surface gating: one place per turn
 
 A turn mounts one place. An explicit Works on mounts only that computer, and

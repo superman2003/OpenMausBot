@@ -68,7 +68,7 @@ export function createTeamAwayEvents(deps: TeamAwayEventsDeps) {
       return;
     }
     if ((original.kind !== "done" && original.kind !== "turn-failed") || own) return;
-    const asked = deps.store.activePath(threadId).findLast((message) => message.role === "user" && !message.peerAsk && message.sender?.id);
+    const asked = deps.store.activePath(threadId).findLast((message) => message.role === "user" && !message.workChat && !message.peerAsk && message.sender?.id);
     const person = asked?.sender?.id;
     if (!asked || !person) return;
     const group = groupName(threadId, original.groupId), { groupId } = original;

@@ -22,8 +22,8 @@ export interface RoomWindow {
   readable: string[];
 }
 
-export function isRoomContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest">): boolean {
-  return Boolean((m.kind === "text" && m.text) || (m.kind === "digest" && m.digest) || m.roomRequest?.phase === "result");
+export function isRoomContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest" | "workChat">): boolean {
+  return !m.workChat && Boolean((m.kind === "text" && m.text) || (m.kind === "digest" && m.digest) || m.roomRequest?.phase === "result");
 }
 
 export interface RoomTranscriptDeps {
@@ -37,6 +37,7 @@ export function createRoomTranscript({ store, teammateReportContext }: RoomTrans
     userName: PersonName,
     textOverrides?: ReadonlyArray<{ messageId: string; text: string }>,
     readerBotId?: string,
+    requiredQueueIds: readonly string[] = [],
   ): RoomWindow {
     const messages = store.messagesFor(threadId);
     const messagesById = new Map(messages.map((message) => [message.id, message]));
@@ -44,7 +45,13 @@ export function createRoomTranscript({ store, teammateReportContext }: RoomTrans
     const narration = roomTurnNarrationIds(messages);
     const context = messages.filter(isRoomContextMessage);
     const readable = context.filter((m) => !narration.has(m.id));
-    const shown = readable.slice(-GROUP_CONTEXT_MESSAGES);
+    const requests = new Set(requiredQueueIds);
+    const required = readable.filter(m => m.queueId && requests.has(m.queueId)).slice(-GROUP_CONTEXT_MESSAGES);
+    const requiredIds = new Set(required.map(m => m.id));
+    const remaining = GROUP_CONTEXT_MESSAGES - required.length;
+    const recent = remaining ? readable.filter(m => !requiredIds.has(m.id)).slice(-remaining) : [];
+    const shownIds = new Set([...requiredIds, ...recent.map(m => m.id)]);
+    const shown = readable.filter(m => shownIds.has(m.id));
     const texts = shown
       .map((m) => {
         if (m.kind === "digest" && m.digest) {

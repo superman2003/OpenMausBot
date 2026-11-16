@@ -180,7 +180,7 @@ export function createPeerLimitResend<Opts extends PeerTurnOpts<Outcome>, Outcom
       // Stop, deletion, a new send, or any replacement generation wins.
       const current = store.projectBotForTask(turn.botId, threadId);
       if (!current || deps.generation(threadId) !== turn.generation || deps.blocked(turn.botId, threadId)
-        || (turn.latestUser && store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text")?.id !== turn.latestUser)
+        || (turn.latestUser && store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text" && !m.workChat)?.id !== turn.latestUser)
         // A file the turn made lands after its end was judged: anything it left by now still means no resend.
         || !nothingRan(store.activePath(threadId), turn.since, turn.turnId, turn.stopError)) return giveUp();
       const from = current.modelSelection, instance = registry.get(from.instanceId);

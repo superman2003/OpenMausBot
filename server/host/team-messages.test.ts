@@ -11,6 +11,14 @@ afterEach(() => { for (const made of fixtures.splice(0)) made.close(); });
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("message_person", () => {
+  it("keeps the task requester's attribution during another person's side chat", () => {
+    const f = fixture();
+    f.said("scout-main", "Tell Ben when the work finishes", CLEO);
+    f.said("scout-main", "How is it going?", ADA, { workChat: true });
+    expect(f.team.pass("scout", "scout-main", "Ben", "The work is ready.").status).toBe(200);
+    expect(f.lines(f.inboxOf(BEN).threadId)[0]!.inbox?.from).toMatchObject({ name: "Cleo" });
+  });
+
   it("passes a private chat's message into the person's inbox, their own chat with their Chief, and nothing else", () => {
     const f = fixture();
     f.said("cleo-private", "My salary review is Friday. Also tell Ben the launch moved to Friday.", CLEO);

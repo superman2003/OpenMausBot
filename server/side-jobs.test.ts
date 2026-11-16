@@ -97,6 +97,16 @@ function setup(options: { helper?: { instanceId: string; model?: string } | null
   return { jobs, state, claude, openrouter, acp, codex };
 }
 
+it("uses the conversation's own background engine for work chat and books the user's thread without a helper", async () => {
+  const { jobs, state, codex, claude } = setup();
+  await jobs.text("work-conversation", "codex", { threadId: "working-thread", trigger: { kind: "user" }, model: "chosen-model" })!.generateText("Discuss the current plan");
+  expect(codex.calls).toHaveLength(1);
+  expect(codex.calls[0]?.options?.model).toBe("chosen-model");
+  expect(claude.calls).toHaveLength(0);
+  expect(state.booked[0]?.row).toMatchObject({ botId: "codex", threadId: "working-thread", trigger: { kind: "user" } });
+  expect(jobs.text("work-conversation", "pi")).toBeNull();
+});
+
 describe("the helper setting", () => {
   const file = join(DATA_DIR, "config.json");
   beforeEach(() => {

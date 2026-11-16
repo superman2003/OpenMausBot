@@ -19,6 +19,7 @@ import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTrigger
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { ServerTextLine, ServerTextParams } from "./server-text.ts";
 import type { WireTool } from "./wire-tool.ts";
+import type { MessageOrigin } from "./message-origin.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
 import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts"; import type { AppSettingCardField, WindowPrefFrame } from "./app-settings.ts";
 import type { SkillRequestCardData } from "./skill-request.ts"; import type { OutsideWriteCardField } from "./outside-write.ts";
@@ -436,7 +437,7 @@ export type CardAnswerer = (
 export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCardFields, WaitLineField, BugReportField {
+export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCardFields, WaitLineField, BugReportField, MessageOrigin {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
@@ -501,19 +502,6 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
    * its words. On a room line this also carries `from`, so the room renders
    * the webhook's bot as the speaker. */
   webhookPost?: boolean;
-  /** user messages sent INTO a running turn (capabilities.queueing). */
-  steered?: boolean;
-  /** user messages a peer bot handed to this thread's RUNNING turn: peer
-   * context folded in mid-turn, never a new request. The text is stored
-   * enveloped exactly as injected. */
-  aside?: boolean;
-  /** A user-role message that arrived through the server's HTTP API
-   * ("api"), or a request a person spoke on a Live call ("call"). */
-  via?: "api" | "call";
-  /** The Live call a "call" line was spoken on (LiveCallState.callId). Set
-   * only on user messages with `via: "call"`; a turn's own messages point
-   * at their request through `requestMessageId` instead. */
-  callId?: string;
   /** A user line an external interface relayed through the guarded send
    * route (the Slack worker): nobody typed it in one of this workspace's
    * clients. A Live call never reads it back as what the caller typed. */

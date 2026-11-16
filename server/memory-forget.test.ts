@@ -51,6 +51,17 @@ describe("withoutMentionedLines", () => {
 });
 
 describe("ownersOwnAsk", () => {
+  it("keeps a hand-off's origin when the owner chats during the task", () => {
+    expect(ownersOwnAsk([
+      { role: "user", kind: "text", peerAsk: true },
+      { role: "user", kind: "text", workChat: true },
+    ])).toBe(false);
+    expect(ownersOwnAsk([
+      { role: "user", kind: "text" },
+      { role: "user", kind: "text", sender: { name: "Asha" }, workChat: true },
+    ])).toBe(true);
+  });
+
   it("is true only when the person's own words started the turn", () => {
     expect(ownersOwnAsk([{ role: "user", kind: "text" }, { role: "bot", kind: "text" }])).toBe(true);
     expect(ownersOwnAsk([{ role: "user", kind: "text", sender: { name: "Asha" } }])).toBe(false);

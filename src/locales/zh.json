@@ -10253,5 +10253,11 @@
   "sidebar.newBotOn.noAi": "那里还没有登录任何 AI。",
   "sidebar.newBotOn.onlyThere": "只在那里登录：{ais}。",
   "sidebar.newBotOn.onlyHere": "只在这里登录：{ais}。",
-  "sidebar.newBotOn.needsUpdate": "My Cloud 需要下一次更新才能这样做。"
+  "sidebar.newBotOn.needsUpdate": "My Cloud 需要下一次更新才能这样做。",
+  "composer.workChat.placeholder": "{name} 正在工作，按 {key} 可继续聊天，任务会继续执行。",
+  "composer.workChat.send": "边做边聊",
+  "composer.workChat.hint": "先回复你的消息，{name} 继续工作。新的执行要求会在当前任务结束后处理。",
+  "settings.workChat.subtitle": "边做边聊会单独回复消息，当前任务继续执行。新的执行要求会在当前任务结束后处理。排队则把消息留到之后。按住 {key} 可对单条消息临时改用另一种方式。",
+  "server.workChat.queued": "这条执行要求已保存，会在当前任务结束后处理。",
+  "server.workChat.failed": "暂时无法单独回复。消息已保存，会在当前任务结束后处理；你也可以继续发消息聊天。"
 }

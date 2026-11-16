@@ -21,7 +21,7 @@ export function slotColors(color: Bot["color"] | undefined, room: boolean): { fi
   return { fill: tone.fill, ink: tone.ink, button: { className: BOT_BUTTON, style: botButtonStyle(own) } };
 }
 
-export function composerPlaceholder({ simple, locked, approval, attaching, listening, replying, busy, canSteer, queued, busyName, sendLabel, group, members, jevOn, goal, botName, setupHint }: {
+export function composerPlaceholder({ simple, locked, approval, attaching, listening, replying, busy, canSteer, busyName, sendLabel, group, members, jevOn, goal, botName, setupHint }: {
   simple: boolean;
   locked: boolean;
   approval: boolean;
@@ -45,6 +45,7 @@ export function composerPlaceholder({ simple, locked, approval, attaching, liste
   if (attaching) return t("composer.placeholder.attaching");
   if (listening) return t("composer.placeholder.listening");
   if (replying && !busy) return t("composer.placeholder.reply");
+  if (busy && canSteer) return t("composer.workChat.placeholder", { name: busyName, key: sendLabel });
   if (simple) {
     if (!busy && goal) return group ? t("composer.placeholder.goal", { name: group.name }) : t("composer.placeholder.goalSolo", { name: botName });
     if (!busy && !group && setupHint) return setupHint;
@@ -52,11 +53,6 @@ export function composerPlaceholder({ simple, locked, approval, attaching, liste
       return t("composer.placeholder.group", { name: group.name, hint: t("composer.hint.mentions") });
     }
     return t("composer.placeholder.bot", { name: group ? group.name : botName });
-  }
-  if (busy && canSteer) {
-    return queued
-      ? t("composer.placeholder.steerQueued", { name: busyName, key: sendLabel })
-      : t("composer.placeholder.steer", { name: busyName, key: sendLabel });
   }
   if (busy) {
     return group
@@ -74,7 +70,7 @@ export function composerPlaceholder({ simple, locked, approval, attaching, liste
 /** The round Send button's name: what pressing it does now. Simple mode says it in the bot's terms. */
 export function sendLabels({ simple, busy, canSteer, name, sendLabel }: { simple: boolean; busy: boolean; canSteer: boolean; name: string; sendLabel: string }): { label: string; title: string } {
   if (busy && canSteer) {
-    const steer = simple ? t("composer.send.steerSimple", { name }) : t("composer.send.steer");
+    const steer = t("composer.workChat.send");
     return { label: steer, title: steer };
   }
   if (busy) {

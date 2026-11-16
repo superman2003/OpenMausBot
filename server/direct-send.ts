@@ -17,6 +17,8 @@ export interface DirectSendInput {
   callId?: string;
   dataContext?: DataContext;
   personPresent: boolean;
+  /** Answer a typed follow-up separately while the current task keeps running. Action requests remain durable follow-ups. */
+  converse?: boolean;
   app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
   /** Sent while the bot works: steer into the running turn, queue after it, or restart it (shared/follow-up.ts). */
   followUp?: FollowUp;

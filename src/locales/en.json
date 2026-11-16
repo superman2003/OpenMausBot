@@ -10994,5 +10994,11 @@
   "sidebar.newBotOn.noAi": "No AI is signed in there yet.",
   "sidebar.newBotOn.onlyThere": "Signed in only there: {ais}.",
   "sidebar.newBotOn.onlyHere": "Signed in only here: {ais}.",
-  "sidebar.newBotOn.needsUpdate": "My Cloud needs its next update for this."
+  "sidebar.newBotOn.needsUpdate": "My Cloud needs its next update for this.",
+  "composer.workChat.placeholder": "{name} is working. Press {key} to chat while work continues.",
+  "composer.workChat.send": "Chat while working",
+  "composer.workChat.hint": "Answer now while {name} keeps working. New actions wait for the current work.",
+  "settings.workChat.subtitle": "Chat while working answers separately without stopping the task. New actions wait until the current work finishes. Queue saves the message for later. {key} uses the other option for one message.",
+  "server.workChat.queued": "Your instruction is saved and will run after the current work finishes.",
+  "server.workChat.failed": "Couldn't answer separately. Your message is saved for after the current work. You can try chatting again."
 }
