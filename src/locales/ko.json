@@ -1,4 +1,8 @@
 {
+  "composer.workChat.send": "작업 중 채팅",
+  "settings.workChat.subtitle": "작업 중 채팅은 작업을 멈추지 않고 별도로 답변합니다. 새로운 실행 요청은 현재 작업이 끝날 때까지 기다립니다. 대기열에 추가하면 메시지를 나중에 처리하도록 저장합니다. {key}로 메시지 하나에만 다른 방식을 사용할 수 있습니다.",
+  "server.workChat.queued": "요청을 저장했습니다. 현재 작업이 끝난 후 실행합니다.",
+  "server.workChat.failed": "별도로 답변하지 못했습니다. 현재 작업이 끝난 후 처리하도록 메시지를 저장했습니다. 다시 채팅을 시도할 수 있습니다.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API 키를 붙여넣으세요",
   "voice.gemini.model": "Gemini 음성 합성 모델",
   "keys.label.geminiTts": "Gemini 음성 합성 API 키",

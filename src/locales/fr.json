@@ -1,4 +1,8 @@
 {
+  "composer.workChat.send": "Discuter pendant le travail",
+  "settings.workChat.subtitle": "Discuter pendant le travail répond séparément sans arrêter la tâche. Les nouvelles actions attendent la fin du travail en cours. Mettre en attente garde le message pour plus tard. {key} utilise l'autre option pour un seul message.",
+  "server.workChat.queued": "Votre instruction est enregistrée et sera exécutée une fois le travail en cours terminé.",
+  "server.workChat.failed": "Impossible de répondre séparément. Votre message est enregistré pour après le travail en cours. Vous pouvez réessayer de discuter.",
   "voice.gemini.keyPlaceholder": "Collez votre clé API Google AI Studio",
   "voice.gemini.model": "Modèle de synthèse vocale Gemini",
   "keys.label.geminiTts": "Clé API de synthèse vocale Gemini",

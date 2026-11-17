@@ -1,4 +1,8 @@
 {
+  "composer.workChat.send": "Çalışırken sohbet et",
+  "settings.workChat.subtitle": "Çalışırken sohbet, görevi durdurmadan ayrı bir yanıt verir. Yeni eylemler mevcut işin bitmesini bekler. Sıraya eklemek mesajı sonraya kaydeder. {key}, tek bir mesaj için diğer seçeneği kullanır.",
+  "server.workChat.queued": "Talimatınız kaydedildi ve mevcut iş bittikten sonra uygulanacak.",
+  "server.workChat.failed": "Ayrı yanıt verilemedi. Mesajınız mevcut işten sonra işlenmek üzere kaydedildi. Yeniden sohbet etmeyi deneyebilirsiniz.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API anahtarınızı yapıştırın",
   "voice.gemini.model": "Gemini konuşma modeli",
   "keys.label.geminiTts": "Gemini konuşma API anahtarı",

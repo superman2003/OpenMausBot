@@ -1,4 +1,8 @@
 {
+  "composer.workChat.send": "Beim Arbeiten chatten",
+  "settings.workChat.subtitle": "Beim Arbeiten chatten antwortet separat, ohne die Aufgabe anzuhalten. Neue Aufträge warten, bis die laufende Arbeit fertig ist. Warteschlange speichert die Nachricht für später. Mit {key} nutzt du für eine Nachricht die andere Option.",
+  "server.workChat.queued": "Dein Auftrag ist gespeichert und wird nach der laufenden Arbeit ausgeführt.",
+  "server.workChat.failed": "Eine separate Antwort war gerade nicht möglich. Deine Nachricht ist für nach der laufenden Arbeit gespeichert. Du kannst es mit dem Chatten erneut versuchen.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API-Schlüssel einfügen",
   "voice.gemini.model": "Gemini-Sprachmodell",
   "keys.label.geminiTts": "Gemini-Sprach-API-Schlüssel",

@@ -2617,8 +2617,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               body: JSON.stringify({
                 text: action.text,
                 replyToId: action.replyToId,
-                threadId,
-                sendId,
+                threadId, sendId,
                 mode: action.mode ?? "chat", ...(action.mentions?.length ? { mentions: action.mentions } : {}), ...(action.pointed?.length ? { pointed: action.pointed } : {}),
                 converse: action.mode !== "goal",
               }),

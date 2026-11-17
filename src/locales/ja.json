@@ -1,4 +1,8 @@
 {
+  "composer.workChat.send": "作業しながらチャット",
+  "settings.workChat.subtitle": "作業しながらチャットでは、タスクを止めずに別の返信を返します。新しい実行指示は現在の作業が終わるまで待機します。キューに追加すると、メッセージを後で処理するために保存します。{key} で、1 件のメッセージだけ別の方法に切り替えられます。",
+  "server.workChat.queued": "指示を保存しました。現在の作業が終わってから実行します。",
+  "server.workChat.failed": "別の返信を返せませんでした。メッセージは現在の作業が終わってから処理するために保存しました。もう一度チャットを試せます。",
   "composer.workChat.placeholder": "{name} は作業中です。{key} で、作業を続けながらチャットできます。",
   "connectedWorkspaces.localTitle": "このコンピューターの環境",
   "connectedWorkspaces.missing": "見つかりません",

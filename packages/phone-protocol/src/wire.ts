@@ -527,8 +527,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   sender?: ResolvedSender;
   /** Provider turn that produced this message. */
   turnId?: string; /** A stopped row where several people use the server: who pressed Stop. */ stoppedBy?: ResolvedSender; /** A bot reply: the `itemId` its words streamed under, so a client swaps the streamed text for this message. */ itemId?: string;
-  /** Server-proven originating user message, including supported harness
-   * continuations. Absent means external clients must not infer ownership. */
+  /** Server-proven user request, including harness continuations. Clients must not infer ownership when absent. */
   requestMessageId?: string;
   /** Provider completion outcome, independent of whether it emitted text. */
   turnSucceeded?: boolean;

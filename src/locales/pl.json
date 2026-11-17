@@ -1,4 +1,8 @@
 {
+  "composer.workChat.send": "Rozmawiaj podczas pracy",
+  "settings.workChat.subtitle": "Rozmowa podczas pracy daje osobną odpowiedź bez zatrzymywania zadania. Nowe działania czekają na zakończenie bieżącej pracy. Dodanie do kolejki zapisuje wiadomość na później. {key} wybiera drugą opcję dla jednej wiadomości.",
+  "server.workChat.queued": "Twoja instrukcja została zapisana i zostanie wykonana po zakończeniu bieżącej pracy.",
+  "server.workChat.failed": "Nie udało się odpowiedzieć osobno. Wiadomość została zapisana na czas po zakończeniu bieżącej pracy. Możesz ponownie spróbować rozmowy.",
   "voice.gemini.keyPlaceholder": "Wklej swój klucz API Google AI Studio",
   "voice.gemini.model": "Model syntezy mowy Gemini",
   "keys.label.geminiTts": "Klucz API syntezy mowy Gemini",

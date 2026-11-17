@@ -1,4 +1,8 @@
 {
+  "composer.workChat.send": "Trò chuyện trong khi làm việc",
+  "settings.workChat.subtitle": "Trò chuyện trong khi làm việc trả lời riêng mà không dừng tác vụ. Các yêu cầu thực hiện mới sẽ chờ công việc hiện tại kết thúc. Thêm vào hàng đợi lưu tin nhắn để xử lý sau. {key} dùng tùy chọn còn lại cho một tin nhắn.",
+  "server.workChat.queued": "Đã lưu chỉ dẫn của bạn và sẽ thực hiện sau khi công việc hiện tại kết thúc.",
+  "server.workChat.failed": "Không thể trả lời riêng. Đã lưu tin nhắn của bạn để xử lý sau công việc hiện tại. Bạn có thể thử trò chuyện lại.",
   "voice.gemini.keyPlaceholder": "Dán khóa API Google AI Studio của bạn",
   "voice.gemini.model": "Mô hình giọng nói Gemini",
   "keys.label.geminiTts": "Khóa API giọng nói Gemini",

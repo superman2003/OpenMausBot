@@ -1,4 +1,8 @@
 {
+  "composer.workChat.send": "Conversar durante o trabalho",
+  "settings.workChat.subtitle": "Conversar durante o trabalho responde separadamente sem interromper a tarefa. Novas ações aguardam o fim do trabalho atual. Colocar na fila salva a mensagem para depois. {key} usa a outra opção para uma única mensagem.",
+  "server.workChat.queued": "Sua instrução foi salva e será executada quando o trabalho atual terminar.",
+  "server.workChat.failed": "Não foi possível responder separadamente. Sua mensagem foi salva para depois do trabalho atual. Você pode tentar conversar novamente.",
   "voice.gemini.keyPlaceholder": "Cole sua chave de API do Google AI Studio",
   "voice.gemini.model": "Modelo de voz do Gemini",
   "keys.label.geminiTts": "Chave de API de voz do Gemini",
