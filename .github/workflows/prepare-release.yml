@@ -29,6 +29,7 @@ concurrency:
 jobs:
   prepare:
     name: Open the version-bump PR
+    if: github.repository == 'milind-soni/OpenMausBot'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

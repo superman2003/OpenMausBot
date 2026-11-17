@@ -51,6 +51,7 @@ permissions:
 jobs:
   prepare:
     name: Pin the release commit
+    if: github.repository == 'milind-soni/OpenMausBot'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
