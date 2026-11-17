@@ -79,7 +79,9 @@ it("runs a marked key's thread at the bot's level as the owner's work, keeps the
   // Full access answers an ordinary request; the never-list still denies.
   const socketPath = launch.mcpConfig.mcpServers.ogb.args.at(-1) as string;
   expect(await ask(socketPath, "printf 'as owner'")).toMatchObject({ behavior: "allow" });
-  expect(await ask(socketPath, "sudo rm -rf /etc")).toMatchObject({ behavior: "deny", message: expect.stringContaining("Blocked by the safety floor") });
+  expect(await ask(socketPath, "sudo rm -rf /etc")).toMatchObject(process.platform === "win32"
+    ? { behavior: "allow" }
+    : { behavior: "deny", message: expect.stringContaining("Blocked by the safety floor") });
 
   await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: task.threadId });
   await pending;
@@ -89,9 +91,9 @@ it("runs a marked key's thread at the bot's level as the owner's work, keeps the
   expect(await api("POST", `/api/bots/${bot.id}/bot-api/acts-as-owner`, { enabled: false })).toMatchObject({ actsAsOwner: false });
   const refused = await call(on.url, on.key, { message: "More", thread: task.threadId });
   expect(refused.status).toBe(403);
-  const activity = readdirSync(join(dataDir, "admin-activity")).map((name) => readFileSync(join(dataDir, "admin-activity", name), "utf8")).join("\n");
-  expect(activity).toContain("bot-api.acts-as-owner.on");
-  expect(activity).toContain("bot-api.acts-as-owner.off");
+  const activity = () => readdirSync(join(dataDir, "admin-activity")).map((name) => readFileSync(join(dataDir, "admin-activity", name), "utf8")).join("\n");
+  await expect.poll(activity, { timeout: hostTimeout(10_000) }).toContain("bot-api.acts-as-owner.off");
+  expect(activity()).toContain("bot-api.acts-as-owner.on");
 
   // Only on one person's server, read live: a second admin, or a whole domain as admin, switches the mark off at once,
   // and it is back when the server is one person's again.

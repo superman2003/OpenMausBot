@@ -4197,17 +4197,11 @@ function updateGroupGoalRunProgress(operation: GroupTurnOperation, detail: strin
 type GroupMemberBotAvailability = "ready" | "busy" | "unavailable" | "cancelled" | "timed_out";
 type GroupMemberBotWaitResult = Exclude<GroupMemberBotAvailability, "busy">;
 
-function roomMemberThreadBusy(botId: string, threadId: string): boolean {
-  return roomMemberLock.heldElsewhere(botId, threadId) ||
-    [...groupSpeakers].some(([otherThreadId, speaker]) => speaker.botId === botId && otherThreadId !== threadId) ||
-    botAtThreadCapacity(botId);
-}
-
 function groupMemberBotAvailability(botId: string, operation: GroupTurnOperation): GroupMemberBotAvailability {
   if (operation.cancelled || operation.cancellation.signal.aborted) return "cancelled";
   const bot = store.bot(botId);
   if (!bot || bot.hidden) return "unavailable";
-  if (roomMemberThreadBusy(botId, operation.threadId)) return "busy";
+  if (bot.busy || roomMemberLock.heldElsewhere(botId, operation.threadId)) return "busy";
   return "ready";
 }
 
@@ -9703,7 +9697,7 @@ async function runClaimedGroupMemberTurn(
     onDispatchError?.(message);
     return true;
   }
-  if (roomMemberThreadBusy(botId, threadId)) {
+  if (bot.busy) {
     if (orchestration) {
       orchestration.result.outcome = "busy";
       return true;
@@ -9921,7 +9915,7 @@ async function runClaimedGroupMemberTurn(
     reportDispatchError(message);
     return true;
   }
-  if (roomMemberThreadBusy(botId, threadId)) {
+  if (readyBot.busy) {
     if (orchestration) {
       orchestration.result.outcome = "busy";
       return true;

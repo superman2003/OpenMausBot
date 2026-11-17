@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 
-it("lets a room member answer while the same bot has direct work", async () => {
+it("waits for direct work before a room member executes", async () => {
   const gateDir = mkdtempSync(join(tmpdir(), "omb-room-direct-"));
   const gate = join(gateDir, "finish.gate");
   const fixture = await launchVerificationServer({
@@ -39,25 +39,32 @@ it("lets a room member answer while the same bot has direct work", async () => {
     const directThreadId = (await fleet()).bots.find((bot: any) => bot.id === worker.id)?.tasks?.find((task: any) => task.busy)?.threadId;
     expect(directThreadId).toBeTruthy();
 
-    const room = (await control("new-channel", "--name", "Concurrent room", "--members", worker.id)).channel;
+    const room = (await control("new-channel", "--name", "Dependent room", "--members", worker.id)).channel;
     const roomThreadId = room.activeTaskId as string;
-    await control("send-channel", "--channel", room.id, "--text", "@Room Worker answer in the room");
+    await control("send-channel", "--channel", room.id, "--text", "@Room Worker continue after the private task");
 
-    await expect.poll(async () => {
-      const current = await fleet();
-      return current.groups.find((group: any) => group.id === room.id)?.tasks?.some(
-        (task: any) => task.threadId === roomThreadId && task.working && task.busyBotId === worker.id,
-      ) ?? false;
-    }, poll).toBe(true);
+    await expect.poll(async () => (await messages(roomThreadId)).some(
+      (message: any) => message.kind === "activity" && message.from?.botId === worker.id &&
+        message.tool?.name?.includes("is finishing another conversation"),
+    ), poll).toBe(true);
     expect((await fleet()).bots.find((bot: any) => bot.id === worker.id)?.tasks?.some((task: any) => task.busy)).toBe(true);
+    expect((await messages(roomThreadId)).some(
+      (message: any) => message.role === "bot" && message.kind === "text",
+    )).toBe(false);
 
     writeFileSync(gate, "finish");
-    await expect.poll(async () => (await messages(directThreadId)).some(
-      (message: any) => message.role === "bot" && message.kind === "text",
-    ), poll).toBe(true);
+    await expect.poll(async () => (await fleet()).bots.find((bot: any) => bot.id === worker.id)?.tasks?.find(
+      (task: any) => task.threadId === directThreadId,
+    )?.busy, poll).toBe(false);
     await expect.poll(async () => (await messages(roomThreadId)).some(
       (message: any) => message.role === "bot" && message.kind === "text",
     ), poll).toBe(true);
+    await expect.poll(async () => (await fleet()).groups.find((group: any) => group.id === room.id)?.tasks?.find(
+      (task: any) => task.threadId === roomThreadId,
+    )?.working, poll).toBe(false);
+    const transcript = await messages(roomThreadId);
+    expect(transcript.find((message: any) => message.tool?.name?.includes("is finishing another conversation"))?.tool?.ok).toBe(true);
+    expect(transcript.some((message: any) => /skipped this round/i.test(message.tool?.name ?? ""))).toBe(false);
   } finally {
     if (!existsSync(gate)) writeFileSync(gate, "finish");
     await fixture.close();

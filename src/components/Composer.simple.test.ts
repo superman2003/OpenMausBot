@@ -152,12 +152,12 @@ describe("the Simple composer in a bot chat", () => {
     expect(menu()).toBeNull();
   });
 
-  it("keeps the plain placeholder while the bot works and says what Send does in the bot's terms", () => {
+  it("offers immediate chat while the bot keeps working", () => {
     restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "and this", attachments: [] });
     render({ bot: { ...bot, busy: true } });
-    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Message Atlas");
-    const send = container.querySelector<HTMLButtonElement>('button[aria-label="Sends when Atlas is done"]')!;
-    expect(send.getAttribute("title")).toBe("Sends when Atlas is done");
+    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Atlas is working. Press Enter to chat while work continues.");
+    const send = container.querySelector<HTMLButtonElement>('button[aria-label="Chat while working"]')!;
+    expect(send.getAttribute("title")).toBe("Chat while working · Ctrl+Enter: Queue");
   });
 
   it("rounds its corners in from 22 to 18 once the message takes a second line", () => {
