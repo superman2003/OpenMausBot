@@ -67,6 +67,7 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
   }
   const context = vm.createContext({
     companyShutdown: false, providerInstancesChanging: new Set(),
+    workConversations: { cancel() {} },
     providerAuthSessions: { clearInstance() {} }, bus: { detach: (id: string) => detached.push(id) },
     liveTurnByThread: new Map(), stoppedTurnText: (_threadId: string, _turnId: string | undefined, cause: string) => cause,
     turnStops: { stopping: (threadId: string, _turnId: string | undefined, cause: string) => causes.push({ threadId, cause, interrupted: interruptCalls.includes(threadId) }) },
@@ -381,6 +382,7 @@ it("ends a room stopped by the harness with its cause, and one the person stoppe
   const run = (outcome?: { status: "stopped"; detail: string; byHarness: true }) => {
     const calls: string[] = [];
     const context = vm.createContext({
+      workConversations: { cancel: (threadId: string) => calls.push(`work-chat:${threadId}`) },
       coordinator: {
         cancelRoom: (...args: string[]) => calls.push(`assignments:${args.join("|")}`),
         stopAwaitingDirect: (threadId: string) => { calls.push(`stop-awaiting:${threadId}`); },
@@ -397,11 +399,13 @@ it("ends a room stopped by the harness with its cause, and one the person stoppe
     return calls;
   };
   expect(run({ status: "stopped", detail: "Turn interrupted — provider settings changed.", byHarness: true })).toEqual([
+    "work-chat:room",
     "assignments:g|room|Turn interrupted — provider settings changed.|failed",
     "member-claims:room",
     "goal:stopped|Turn interrupted — provider settings changed.",
   ]);
   expect(run()).toEqual([
+    "work-chat:room",
     "cards-stopped:room", "stop-awaiting:room",
     "assignments:g|room", "member-claims:room", "goal:stopped|Stopped by you.",
   ]);

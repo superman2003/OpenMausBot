@@ -6,7 +6,8 @@
 
 ## 发布 Windows 版本
 
-1. 保留本分支的功能，修改 `package.json` 中的版本号，使其高于已安装的版本，然后推送到 `main`。
+1. 保留本分支的功能，修改 `package.json` 中的版本号，使其高于已安装的版本。
+   运行 `node scripts/record-data-format.mjs` 记录该版本的数据格式兼容信息，将这两项一起提交并推送到 `main`。
 2. 在 GitHub Actions 运行 **Release Windows to personal repository**，选择 `main`。
    默认创建草稿；勾选 `publish` 后会在构建和验证通过后直接发布。
 3. 工作流从同一个提交构建 Windows x64 安装包，检查更新目标、版本、文件大小与 SHA-512，
