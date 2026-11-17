@@ -6,6 +6,7 @@ import { DATA_DIR, loadConfig, parseConfigPatch, parseStoredConfig } from "./con
 import type { TextGenerationOptions } from "./contracts.ts";
 import { createMemoryUpkeep, NO_TEXT_ENGINE, type UpkeepBot } from "./memory-upkeep.ts";
 import { closeMessageDb } from "./message-db.ts";
+import { createJobSlots } from "./job-slots.ts";
 import { createSideJobs, helperSelection, type SideJobBot, type SideJobInstance, type SideJobsDeps } from "./side-jobs.ts";
 import { ensureWorkspace, workspaceDir, WORKSPACES_DIR } from "./workspace.ts";
 
@@ -60,7 +61,7 @@ function backgroundEngine(instanceId: string, driverKind: string) {
 
 const bot = (id: string, instanceId: string): SideJobBot => ({ id, name: `Bot ${id}`, threadId: `main-${id}`, modelSelection: { instanceId } });
 
-function setup(options: { helper?: { instanceId: string; model?: string } | null; modelAllowed?: SideJobsDeps["modelAllowed"]; smallModels?: SideJobsDeps["smallModels"] } = {}) {
+function setup(options: { helper?: { instanceId: string; model?: string } | null; modelAllowed?: SideJobsDeps["modelAllowed"]; smallModels?: SideJobsDeps["smallModels"]; slots?: SideJobsDeps["slots"] } = {}) {
   const claude = textEngine("claude", "claudeAgent");
   const openrouter = textEngine("openrouter", "openai-compat");
   const acp = backgroundEngine("grok", "grokAgent");
@@ -93,6 +94,7 @@ function setup(options: { helper?: { instanceId: string; model?: string } | null
     },
     book: (row, tokensReported, notificationThreadId) => state.booked.push({ row, tokensReported, notificationThreadId }),
     log: (line) => state.logs.push(line),
+    ...(options.slots ? { slots: options.slots } : {}),
   });
   return { jobs, state, claude, openrouter, acp, codex };
 }
@@ -105,6 +107,23 @@ it("uses the conversation's own background engine for work chat and books the us
   expect(claude.calls).toHaveLength(0);
   expect(state.booked[0]?.row).toMatchObject({ botId: "codex", threadId: "working-thread", trigger: { kind: "user" } });
   expect(jobs.text("work-conversation", "pi")).toBeNull();
+});
+
+it("answers work chat while every background writing slot is occupied", async () => {
+  const slots = createJobSlots(1);
+  let release!: () => void;
+  const occupied = slots.run(() => new Promise<void>((resolve) => { release = resolve; }));
+  await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+  try {
+    const { jobs, codex } = setup({ slots });
+    await jobs.text("work-conversation", "codex")!.generateText("How is it going?");
+    expect(codex.calls).toHaveLength(1);
+    expect(slots.running).toBe(1);
+    expect(slots.waiting).toBe(0);
+  } finally {
+    release();
+    await occupied;
+  }
 });
 
 describe("the helper setting", () => {
@@ -635,5 +654,28 @@ describe("memory upkeep through the resolver", () => {
     expect(await upkeep(capped.jobs).capture({ botId: BOT.id, threadId: "t1", turns })).toMatchObject({ added: 0, note: "The capture call did not answer in time." });
     expect(capped.claude.calls).toEqual([]);
     expect(memory()).toBe(before);
+  });
+});
+
+describe("background engine calls across bots", () => {
+  it("run a few at once, while the ones a turn or a person waits on start at once", async () => {
+    let open = 0, most = 0;
+    const releases: Array<() => void> = [];
+    const { jobs, state } = setup({ slots: createJobSlots(1) });
+    state.instances.set("claude", { ...state.instances.get("claude")!, generateText: async () => {
+      open += 1; most = Math.max(most, open);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      open -= 1;
+      return "ok";
+    } });
+    const memory = [jobs.text("memory", "claude")!.generateText("a"), jobs.text("memory", "claude")!.generateText("b")];
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(open).toBe(1);
+    const summary = jobs.text("compaction", "claude")!.generateText("c");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(open).toBe(2);
+    while (releases.length || open) { releases.shift()?.(); await new Promise((resolve) => setTimeout(resolve, 5)); }
+    expect(await Promise.all([...memory, summary])).toEqual(["ok", "ok", "ok"]);
+    expect(most).toBe(2);
   });
 });
