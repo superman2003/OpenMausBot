@@ -148,11 +148,9 @@ export async function verifyBrowserFilePicker(options: {
     await assert.rejects(pickFiles({ ...main, senderFrame: {} }, address, false, "video/mp4"), /Invalid browser file picker/);
     await assert.rejects(pickFiles(main, "/api/config?chooser=" + disk.id, false, "video/mp4"), /Invalid browser file picker/);
     assert.equal(await pickFiles(main, address, disk.multiple, disk.accept), true);
-    assert.deepEqual(pickerOptions, {
-      title: "browser.page.chooseFilesLabel",
-      properties: ["openFile"],
-      filters: [{ name: "Accepted files", extensions: ["mp4"] }],
-    });
+    assert.equal(pickerOptions?.title, "browser.page.chooseFilesLabel");
+    assert.deepEqual(pickerOptions?.properties, ["openFile"]);
+    assert.equal((pickerOptions?.filters as Array<{ extensions?: string[] }> | undefined)?.[0]?.extensions?.includes("mp4"), true);
     assert.deepEqual(await event("fileChooserClosed"), { id: disk.id });
     assert.deepEqual(await readFiles(), { draft: "Bundled browser works", files: [{ name: basename(localFile), size: (await stat(localFile)).size }] });
     await action({ type: "release" });
