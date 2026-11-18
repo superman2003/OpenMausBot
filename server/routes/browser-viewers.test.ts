@@ -72,11 +72,12 @@ afterEach(async () => {
   for (const folder of folders.splice(0)) await removeTempDir(folder);
 });
 
-async function serve({ attach, current = () => true, download, audience = () => "team" }: {
+async function serve({ attach, current = () => true, download, audience = () => "team", desktopUploadToken }: {
   attach?: (options: ViewerOptions, push: (output: ViewerOutput) => void) => Promise<Viewer>;
   current?: () => boolean;
   download?: (id: string) => Download | undefined;
   audience?: (threadId: string | null) => Audience | null;
+  desktopUploadToken?: string;
 } = {}): Promise<Fixture> {
   const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], people: [], sizes: [], opened: [], checked: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
   folders.push(fixture.dataDir);
@@ -94,6 +95,7 @@ async function serve({ attach, current = () => true, download, audience = () => 
   const deps: BrowserViewerRouteDeps = {
     upgrades,
     dataDir: fixture.dataDir,
+    desktopUploadToken: () => desktopUploadToken,
     person: (auth) => (auth.kind === "session" ? `person-of-${auth.session.id}` : "local-owner"),
     viewers: {
       open: async (options) => {
@@ -368,6 +370,26 @@ describe("the page's file picker and downloads", () => {
     expect(await answered).toBe(409);
     body.destroy();
     expect(fixture.answers).toEqual([]);
+    expect(existsSync(join(fixture.dataDir, "browser-uploads"))).toBe(false);
+  });
+
+  it("takes only the desktop main process's selected paths for the current picker without staging files", async () => {
+    const desktopUploadToken = "synthetic-local-desktop-test";
+    const fixture = await serve({ desktopUploadToken });
+    const file = join(fixture.dataDir, "video.mp4");
+    writeFileSync(file, "video fixture");
+    const send = (chooser: string, headers: Record<string, string>, files = [file]) => fetch(
+      `http://${fixture.origin}/api/bots/pepper/browser/upload?chooser=${chooser}`,
+      { method: "PUT", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ files }) },
+    );
+    const trusted = { "x-openmausbot-desktop-owner": desktopUploadToken };
+    expect((await send("chooser-1", {})).status).toBe(403);
+    expect((await send("chooser-1", { ...trusted, "sec-fetch-site": "same-origin" })).status).toBe(403);
+    expect((await send("stale", trusted)).status).toBe(409);
+    expect((await send("chooser-1", trusted, [fixture.dataDir])).status).toBe(400);
+    expect(fixture.answers).toEqual([]);
+    expect((await send("chooser-1", trusted)).status).toBe(204);
+    expect(fixture.answers).toEqual([{ owner: "local-owner", chooser: "chooser-1", files: [{ name: "video.mp4", text: "video fixture" }] }]);
     expect(existsSync(join(fixture.dataDir, "browser-uploads"))).toBe(false);
   });
 

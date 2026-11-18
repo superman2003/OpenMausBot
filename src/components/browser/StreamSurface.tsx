@@ -617,6 +617,20 @@ export function StreamSurface(props: {
       notify({ kind: "error", message: t("browser.page.uploadFailed", { error: cause instanceof Error ? cause.message : String(cause) }) }));
   };
 
+  const chooseFile = () => {
+    const chooser = fileChooser;
+    if (!chooser) return;
+    const nativePicker = window.ogb?.pickBrowserFiles;
+    if (!nativePicker) {
+      fileInputRef.current?.click();
+      return;
+    }
+    void nativePicker(chooser.uploadUrl, chooser.multiple, chooser.accept).then((uploaded) => {
+      if (uploaded) setFileChooser((current) => current?.uploadUrl === chooser.uploadUrl ? null : current);
+    }).catch((cause: unknown) =>
+      notify({ kind: "error", message: t("browser.page.uploadFailed", { error: cause instanceof Error ? cause.message : String(cause) }) }));
+  };
+
   const direct = (message: PreviewStreamInput) => clientRef.current?.send(message);
   const canvas = canvasRef.current;
   const selectAnchor = select && canvas && viewportRef.current && canvas.width > 0
@@ -712,7 +726,7 @@ export function StreamSurface(props: {
             />
             <div className="flex justify-end gap-2">
               <button type="button" className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-inset" onClick={() => answerFileChooser([])}>{t("common.cancel")}</button>
-              <button type="button" className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-accent-ink" onClick={() => fileInputRef.current?.click()}>{t(fileChooser.multiple ? "browser.page.chooseFiles" : "browser.page.chooseFile")}</button>
+              <button type="button" className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-accent-ink" onClick={chooseFile}>{t(fileChooser.multiple ? "browser.page.chooseFiles" : "browser.page.chooseFile")}</button>
             </div>
           </div>
         ) : null}

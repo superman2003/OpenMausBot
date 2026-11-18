@@ -181,7 +181,7 @@ const previewStreamUploadUrl = (target: Pick<PreviewStreamTarget, "access">, cho
 /** Sends files to a page's open picker. Rejects when the server refuses them. */
 export async function uploadPreviewStreamFiles(
   chooser: PreviewStreamFileChooser,
-  files: ReadonlyArray<Blob & { readonly name?: string }>,
+  files: readonly File[],
 ): Promise<void> {
   const body = new FormData();
   for (const file of files) body.append("file", file, file.name ?? "file");

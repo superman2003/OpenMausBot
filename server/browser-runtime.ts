@@ -28,7 +28,7 @@ export const BROWSER_HOVER_TOOL = "agent_browser_hover";
 const RELAYED_TOOL_SPECS = [
   {
     name: BROWSER_UPLOAD_TOOL,
-    description: "Put files into a file input (<input type=\"file\">), then submit its form as usual. files are absolute paths of files the person attached to this conversation or files in your own working folder; any other path is refused.",
+    description: "Set the page's <input type=\"file\"> directly, without opening the native file picker. Use absolute paths to the person's attachments in this conversation or files in your working folder. Continue with the page's upload or submit flow.",
     inputSchema: {
       type: "object", additionalProperties: false, required: ["selector", "files"],
       properties: {

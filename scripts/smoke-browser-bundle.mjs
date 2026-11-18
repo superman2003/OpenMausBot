@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -277,8 +277,15 @@ try {
   assert(chromeVersion.includes(spec.chrome.version), `Unexpected Chromium version: ${chromeVersion}`);
 
   const title = `OpenMausBot bundled browser ${randomBytes(6).toString("hex")}`;
-  server = createServer((_request, response) => {
+  server = createServer((request, response) => {
     fixtureRequests += 1;
+    if (request.method === "POST" && request.url === "/fixture-video") {
+      let bytes = 0;
+      request.on("data", (chunk) => { bytes += chunk.length; });
+      request.on("end", () => response.end(String(bytes)));
+      request.on("error", () => response.destroy());
+      return;
+    }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
     response.end(`<!doctype html><html><head><title>${title}</title></head><body>
       <h1>${title}</h1><label for="message">Test message</label><input id="message">
@@ -298,6 +305,8 @@ try {
   gate = await openGate({ decide: (target, addresses) => refusalFor(target, addresses, rules) });
   const windowsLauncher = target === "win32-x64" && engineVersionExpected === WINDOWS_VENDOR_VERSION;
   const launcherUa = "OpenMausBot Windows launcher (local, fixture)";
+    const video = await realpath(join(fixture, "local-video.mp4"));
+  const videoSize = 100 * 1024 * 1024 + 17;
   let launcher;
   if (windowsLauncher) {
     const { windowsLauncherPath, writeWindowsLauncher } = await import("../server/browser/chrome/wrapper.ts");
@@ -343,10 +352,12 @@ try {
   assert.equal((await alpha.tool("agent_browser_get_text", { selector: "#result" })).data.text, "Bundled browser works");
   if (windowsLauncher) {
     const position = (await alpha.tool("agent_browser_eval", { script: "(() => { const r = document.querySelector('#pick-video').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()" })).data.result;
+    await writeFile(video, "");
+    await truncate(video, videoSize);
     phase = "Windows video file picker";
     const { verifyBrowserFilePicker } = await import("./testing/smoke-browser-file-picker.ts");
     const before = await ownedDaemonPid(alpha);
-    await verifyBrowserFilePicker({ spec: { ...alpha.integration, env: { ...env, ...alpha.integration.env } }, dataDir: env.OMB_DATA_DIR, button: position,
+    await verifyBrowserFilePicker({ spec: { ...alpha.integration, env: { ...env, ...alpha.integration.env } }, dataDir: env.OMB_DATA_DIR, localFile: video, button: position,
       readFiles: async () => (await alpha.tool("agent_browser_eval", { script: "({ draft: document.querySelector('#message').value, files: Array.from(document.querySelector('#video').files, f => ({ name: f.name, size: f.size })) })" })).data.result,
     });
     assert.equal(await ownedDaemonPid(alpha), before, "Choosing a video must not restart the browser");
@@ -364,6 +375,27 @@ try {
     return answer.data;
   };
   assert.equal((await relayed({ action: "stream_status" })).connected, true);
+  if (windowsLauncher) {
+    phase = "Windows agent video upload";
+    const { uploadableFiles } = await import("../server/browser-upload.ts");
+    const { BrowserRuntime, BROWSER_UPLOAD_TOOL } = await import("../server/browser-runtime.ts");
+    const uploadedBytes = async () => (await alpha.tool("agent_browser_eval", { script: "(async () => { const file = document.querySelector('#video').files[0]; return +(await (await fetch('/fixture-video', { method: 'POST', body: file })).text()); })()" })).data.result;
+    assert.equal(await uploadedBytes(), videoSize, "Chrome must send all bytes of the desktop-selected video");
+    const approved = uploadableFiles([video], [fixture]);
+    assert(!("error" in approved), approved.error);
+    const before = await ownedDaemonPid(alpha);
+    const runtime = new BrowserRuntime({ relayCommand: (_spec, _session, command, timeoutMs) => relay(relayPort, command, { timeoutMs }) });
+    try {
+      const result = await runtime.agentRpc(relayTarget.session, { ...alpha.integration, env: relayTarget.env }, "tools/call", {
+        name: BROWSER_UPLOAD_TOOL, arguments: { selector: "#video", files: approved.files },
+      });
+      assert(!result?.isError, JSON.stringify(result));
+      assert.equal(await uploadedBytes(), videoSize, "Chrome must send all bytes of the agent-selected video");
+      assert.equal(await ownedDaemonPid(alpha), before, "Agent upload must keep the current browser");
+    } finally {
+      await runtime.closeAll();
+    }
+  }
   for (const list of [["console", "messages"], ["errors", "errors"]]) assert(Array.isArray((await relayed({ action: list[0] }))[list[1]]), `relayed ${list[0]} has no list`);
   assert(Array.isArray((await relayed({ action: "requests", status: "400-599" })).requests), "relayed requests has no list");
   const snapshot = (await alpha.tool("agent_browser_snapshot", { compact: true })).data;
@@ -401,7 +433,7 @@ try {
   assert(image?.data, "MCP did not return the screenshot image to the agent");
   const screenshotInfo = pngInfo(await readFile(screenshotPath));
   assert.deepEqual(pngInfo(Buffer.from(image.data, "base64")), screenshotInfo, "MCP image differs from screenshot file");
-  report = { ok: true, target, engineMode: values["engine-candidate"] ? "vendor-candidate" : "packaged", engineVersion, chromeVersion, checks: ["fresh-home auto-discovery", "real MCP cold-start navigation", "title", "input and click", "loopback relay reads, ref box and screenshot", "same-MCP close and reopen", "PNG screenshot after restart", "two-bot cookie and localStorage isolation", ...(windowsLauncher ? ["direct Windows Chrome launch and literal launcher arguments", "video file picker cancel and upload without restarting"] : [])], screenshot: screenshotInfo };
+  report = { ok: true, target, engineMode: values["engine-candidate"] ? "vendor-candidate" : "packaged", engineVersion, chromeVersion, checks: ["fresh-home auto-discovery", "real MCP cold-start navigation", "title", "input and click", "loopback relay reads, ref box and screenshot", "same-MCP close and reopen", "PNG screenshot after restart", "two-bot cookie and localStorage isolation", ...(windowsLauncher ? ["direct Windows Chrome launch and literal launcher arguments", "video file picker cancel and upload without restarting", "agent uploads a local file over 100 MiB without opening the picker"] : [])], screenshot: screenshotInfo };
 } catch (error) {
   failure = error;
   try { await failureDiagnostics(); } catch (diagnosticError) {

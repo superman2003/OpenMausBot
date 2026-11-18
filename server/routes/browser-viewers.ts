@@ -4,18 +4,21 @@
 // is fetched from GET …/browser/download/:id. Never mix login frames into the general events feed, which every device
 // reads.
 import { createReadStream, rmSync } from "node:fs";
+import { realpath, stat } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, win32 } from "node:path";
 import { Readable, Transform } from "node:stream";
 
 import { BROWSER_UPLOAD_MAX_BYTES as UPLOAD_MAX_BYTES } from "../../shared/upload-limits.ts";
 import type { Audience } from "../audience.ts";
 import { storeUploads } from "../browser-upload.ts";
+import { attachesToChrome } from "../browser-runtime.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { LiveRouter } from "../browser/engines.ts";
 import { requestedSize } from "../browser/viewers/viewport.ts";
 import { messageFileDisposition } from "../message-file.ts";
-import { isSameOrigin, type RequestAuth } from "../request-auth.ts";
+import { isDesktopMainRequest, isSameOrigin, type RequestAuth } from "../request-auth.ts";
+import { inSecretFolder, SECRET_FILE_REFUSAL } from "../secret-folder.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import type { Upgrades } from "./upgrades.ts";
 
@@ -47,6 +50,7 @@ export interface BrowserViewerRouteDeps {
   /** Why a person may not restart this browser now, or null. */
   restartRefusal(session: string): string | null;
   dataDir: string;
+  desktopUploadToken?(): string | undefined;
 }
 
 const ownerOf = (auth: RequestAuth) => (auth.kind === "session" ? auth.session.id : "local-owner");
@@ -97,6 +101,22 @@ async function answerUpload(req: IncomingMessage, deps: BrowserViewerRouteDeps, 
   if (await deps.viewers.answerFileChooser(browser, owner, chooser, paths).catch(() => false)) return null;
   for (const file of paths) rmSync(dirname(file), { recursive: true, force: true });
   return { status: 409, error: PICKER_CLOSED };
+}
+
+async function pickedFilePaths(value: unknown): Promise<string[]> {
+  if (!Array.isArray(value) || value.length === 0 || value.length > UPLOAD_MAX_FILES
+    || !value.every((file): file is string => typeof file === "string" && file.length <= 4096 && isAbsolute(file))) {
+    throw new UploadError(400, "Choose up to 20 local files.");
+  }
+  return Promise.all(value.map(async (file) => {
+    if (process.platform === "win32" && !/^[a-z]:[\\/]$/i.test(win32.parse(file).root)) {
+      throw new UploadError(400, "Choose files on this computer.");
+    }
+    const path = await realpath(file).catch(() => null);
+    if (!path || !(await stat(path).catch(() => null))?.isFile()) throw new UploadError(400, "A selected file is no longer available.");
+    if (inSecretFolder(path.toLowerCase())) throw new UploadError(403, SECRET_FILE_REFUSAL);
+    return path;
+  }));
 }
 
 export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHandler {
@@ -161,7 +181,12 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
     }
 
     if (upload) {
-      if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const direct = method === "PUT";
+      if (method !== "POST" && !direct) return json(res, 405, { error: "method not allowed" });
+      if (direct && (auth.kind !== "loopback" || auth.trust || auth.companionDevice
+        || !isDesktopMainRequest(req, deps.desktopUploadToken?.()) || attachesToChrome(browser.spec.env ?? {}))) {
+        return json(res, 403, { error: "Local file selection is available in the desktop app." });
+      }
       const chooser = url.searchParams.get("chooser") ?? "";
       if (!CHOOSER.test(chooser)) return json(res, 400, { error: "Name the page's file picker." });
       // Security: a body is read into memory only for the picker this person was offered, one upload of theirs at a time.
@@ -172,7 +197,18 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
         return json(res, refused.status, { error: refused.error });
       }
       uploading.add(owner);
-      const unanswered = await answerUpload(req, deps, browser, owner, chooser).finally(() => uploading.delete(owner));
+      const answer = async (): Promise<(Failure & { unread?: boolean }) | null> => {
+        if (!direct) return answerUpload(req, deps, browser, owner, chooser);
+        try {
+          const files = await pickedFilePaths((await readBody(req, 128 * 1024))?.files);
+          if (isCurrent() && await deps.viewers.answerFileChooser(browser, owner, chooser, files).catch(() => false)) return null;
+          return { status: 409, error: PICKER_CLOSED };
+        } catch (error) {
+          if (!(error instanceof UploadError)) throw error;
+          return { status: error.status, error: error.message };
+        }
+      };
+      const unanswered = await answer().finally(() => uploading.delete(owner));
       if (!unanswered) {
         res.writeHead(204).end();
         return;

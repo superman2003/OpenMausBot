@@ -146,7 +146,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   agent_browser_hover: "Move the mouse over an element or a point, for menus and tooltips that open on hover.",
   agent_browser_drag: "Drag one element (or point) onto another.",
   agent_browser_scroll: "Scroll the page, or the scrollable element named by ref or selector, by dx and dy CSS pixels.",
-  agent_browser_upload: "Put files into a file input (ref or selector), or answer the file picker the page opened. Then submit its form as usual.",
+  agent_browser_upload: "Use a file input's ref or selector to set files directly without opening a picker. You can also answer an already open picker. Then continue with the page's upload or submit flow.",
   agent_browser_wait: "Wait until every condition given holds: a time, text on the page, an element appearing or going, the address, or a load state. 60 s at most.",
   agent_browser_eval: "Run JavaScript in the page and return its value. It needs the same control as clicking, and is refused while a filled password is still on the page.",
   agent_browser_dialog: "Accept or dismiss the alert, confirm or prompt dialog the page opened (agent_browser_status shows it). Nothing else works on the tab until it is answered.",

@@ -197,6 +197,21 @@ describe("what the page asks of the person", () => {
     expect(fetches[1]!.body.getAll("file")).toEqual([]);
   });
 
+  it("opens the native desktop picker instead of buffering video bytes in the renderer", async () => {
+    const pickBrowserFiles = vi.fn(async () => true);
+    vi.stubGlobal("ogb", { pickBrowserFiles });
+    const networkUpload = vi.fn();
+    vi.stubGlobal("fetch", networkUpload);
+    const { show, events } = await mount();
+    await show(control("you"));
+    const uploadUrl = "/api/bots/pepper/browser/upload?chooser=local";
+    await act(async () => events().onFileChooser?.({ multiple: false, accept: "video/*", uploadUrl, credentials: true }));
+    await act(async () => { await button("Choose file").click(); });
+    await flush();
+    expect(pickBrowserFiles).toHaveBeenCalledExactlyOnceWith(uploadUrl, false, "video/*");
+    expect(networkUpload).not.toHaveBeenCalled();
+  });
+
   it("offers what the page downloaded, saved from the bot's computer on Save", async () => {
     const clicked: Array<{ href: string; download: string }> = [];
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { clicked.push({ href: this.getAttribute("href")!, download: this.download }); });

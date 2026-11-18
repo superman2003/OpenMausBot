@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import type { Audience } from "../audience.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { Store } from "../store.ts";
 import { TurnResources, type TurnOwner } from "../turn-resources.ts";
+import { BROWSER_UPLOAD_MAX_BYTES } from "../../shared/upload-limits.ts";
 import { BrowserRuntime } from "../browser-runtime.ts";
 import { LentChromeDoors, type ChromeLender } from "../browser/lent-chrome.ts";
 import { audienceBrowserSuffix } from "../browser/audience.ts";
@@ -786,6 +787,32 @@ describe("a Team Cloud's browsers, one per audience", () => {
 
 describe("a Team Cloud's boxed browsers and the files a turn uploads", () => {
   afterEach(() => chromeLauncher.boxWith(() => null));
+
+  it("lets a Windows desktop agent choose an oversized workspace file or stage it under its original attachment name", async () => {
+    const work = realpathSync.native(mkdtempSync(join(tmpdir(), "omb-desktop-upload-")));
+    try {
+      const file = join(work, "stored.mp4");
+      const size = BROWSER_UPLOAD_MAX_BYTES + 1;
+      writeFileSync(file, "");
+      truncateSync(file, size);
+      const approved = uploadableFiles([file], [work]);
+      expect(approved).toEqual({ files: [file] });
+      vi.stubGlobal("process", { ...process, platform: "win32" });
+      const desktop = setup(undefined).host;
+      const server = setup(undefined, { server: true }).host;
+      const spec = { command: "agent-browser", env: {} };
+      const renamed = [{ file, name: "video.mp4" }];
+      await expect(desktop.uploadPaths([{ file, name: null }], "bot-scout", spec)).resolves.toEqual([file]);
+      await expect(server.uploadPaths(renamed, "bot-scout", spec)).rejects.toThrow(/limit/i);
+      const [staged] = await desktop.uploadPaths(renamed, "bot-scout", spec);
+      expect(staged).toMatch(/video\.mp4$/);
+      expect(statSync(staged!).size).toBe(size);
+      rmSync(staged!);
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
 
   it.each([null, "report.txt", "Report.txt"])("gives Chrome on Windows a private copy of a workspace file (name: %s)", async (name) => {
     const work = realpathSync(mkdtempSync(join(tmpdir(), "omb-host-upload-windows-")));

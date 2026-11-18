@@ -636,6 +636,11 @@ function secureTokenMatch(actual: string | undefined, expected: string): boolean
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+export function isDesktopMainRequest(req: IncomingMessage, token: string | undefined): boolean {
+  return token !== undefined && !fromBrowser(req) && req.headers.origin === undefined
+    && secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), token);
+}
+
 export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions): RequestAuthResult {
   const method = req.method ?? "GET";
   const path = options.url.pathname;

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
+import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { basename } from "node:path";
+import { installFilePickers } from "../../electron/file-pickers.mjs";
 import { BrowserLive } from "../../server/browser-live.ts";
 import { relay } from "../../server/browser-relay.ts";
 import { BrowserRuntime, type BrowserSpawnSpec } from "../../server/browser-runtime.ts";
@@ -16,10 +20,12 @@ const LOCAL = { kind: "loopback", scopes: ["admin", "client"] } as RequestAuth;
 export async function verifyBrowserFilePicker(options: {
   spec: BrowserSpawnSpec;
   dataDir: string;
+  localFile: string;
   button: { x: number; y: number };
   readFiles: () => Promise<unknown>;
 }): Promise<void> {
-  const { spec, dataDir, button, readFiles } = options;
+  const { spec, dataDir, localFile, button, readFiles } = options;
+  const desktopToken = randomBytes(32).toString("base64url");
   const session = spec.env.AGENT_BROWSER_SESSION!;
   const runtime = new BrowserRuntime();
   const live = new BrowserLive({ runtime, devTools: {
@@ -29,6 +35,7 @@ export async function verifyBrowserFilePicker(options: {
   const route = createBrowserViewerRoutes({
     upgrades: createUpgrades(),
     dataDir,
+    desktopUploadToken: () => desktopToken,
     person: () => "local-owner",
     audience: () => "team",
     browser: async (botId) => ({ botId, session, spec: { ...spec, env: { ...spec.env } } }),
@@ -55,7 +62,8 @@ export async function verifyBrowserFilePicker(options: {
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  const base = "http://127.0.0.1:" + (server.address() as AddressInfo).port + "/api/bots/pepper/browser";
+  const origin = "http://127.0.0.1:" + (server.address() as AddressInfo).port;
+  const base = origin + "/api/bots/pepper/browser";
   const abort = new AbortController();
   try {
     const response = await fetch(base + "/live?filePicker=1", {
@@ -115,6 +123,38 @@ export async function verifyBrowserFilePicker(options: {
     assert.equal(answer.status, 204, await answer.text());
     assert.deepEqual(await event("fileChooserClosed"), { id: picked.id });
     assert.deepEqual(await readFiles(), { draft: "Bundled browser works", files: [{ name: "fixture-video.mp4", size: bytes.length }] });
+
+    const handlers = new Map<string, (event: unknown, address: string, multiple: boolean, accept: string) => Promise<boolean>>();
+    let pickerOptions: Record<string, unknown> | undefined;
+    installFilePickers({
+      ipcMain: { handle: (channel: string, handler: (event: unknown, address: string, multiple: boolean, accept: string) => Promise<boolean>) => handlers.set(channel, handler) },
+      localOnly: (_channel: string, handler: unknown) => handler,
+      dialog: { showOpenDialog: async (_window: unknown, options: Record<string, unknown>) => {
+        pickerOptions = options;
+        return { canceled: false, filePaths: [localFile] };
+      } },
+      windowFor: () => undefined,
+      t: (key: string) => key,
+      browserUpload: {
+        origin: () => origin,
+        request: (path: string, init: RequestInit) => fetch(origin + path, { ...init, headers: { ...init.headers, "x-openmausbot-desktop-owner": desktopToken } }),
+      },
+    });
+    const disk = await choose();
+    const root = {};
+    const main = { sender: { mainFrame: root }, senderFrame: root };
+    const pickFiles = handlers.get("browser:pick-files")!;
+    const address = base + "/upload?" + new URLSearchParams({ chooser: disk.id });
+    await assert.rejects(pickFiles({ ...main, senderFrame: {} }, address, false, "video/mp4"), /Invalid browser file picker/);
+    await assert.rejects(pickFiles(main, "/api/config?chooser=" + disk.id, false, "video/mp4"), /Invalid browser file picker/);
+    assert.equal(await pickFiles(main, address, disk.multiple, disk.accept), true);
+    assert.deepEqual(pickerOptions, {
+      title: "browser.page.chooseFilesLabel",
+      properties: ["openFile"],
+      filters: [{ name: "Accepted files", extensions: ["mp4"] }],
+    });
+    assert.deepEqual(await event("fileChooserClosed"), { id: disk.id });
+    assert.deepEqual(await readFiles(), { draft: "Bundled browser works", files: [{ name: basename(localFile), size: (await stat(localFile)).size }] });
     await action({ type: "release" });
   } finally {
     abort.abort();

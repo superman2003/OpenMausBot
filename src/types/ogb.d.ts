@@ -354,6 +354,8 @@ const __APP_VERSION__: string;
       /** Absolute path of a dropped File ("" when the drag carried no
        * file on disk). Absent in older builds of the shell. */
       getPathForFile?(file: File): string;
+      /** Attaches disk-backed selections to the local browser's active picker. False when a file has no disk path. */
+      pickBrowserFiles?(address: string, multiple: boolean, accept: string): Promise<boolean>;
       /** {mic} TCC status: granted|denied|not-determined|unknown. Screen
        * status is deliberately absent — macOS 15+ caches it per-process,
        * so it lies for the whole session after a grant. `pageMic`: whether

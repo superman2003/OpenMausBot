@@ -29,8 +29,9 @@ describe("files a page may receive", () => {
 
   it("refuses any other file, including one reached through a symlink or a ..", () => {
     const { attachments, outside, roots } = folders();
-    symlinkSync(join(outside, "secret.txt"), join(attachments, "looks-attached.txt"));
-    for (const file of [join(outside, "secret.txt"), join(attachments, "looks-attached.txt"), join(attachments, "..", "outside", "secret.txt"), process.execPath]) {
+    const linked = join(attachments, "linked-folder");
+    symlinkSync(outside, linked, process.platform === "win32" ? "junction" : "dir");
+    for (const file of [join(outside, "secret.txt"), join(linked, "secret.txt"), join(attachments, "..", "outside", "secret.txt"), process.execPath]) {
       expect(uploadableFiles([file], roots)).toEqual({ error: expect.stringMatching(/cannot be uploaded/) });
     }
   });

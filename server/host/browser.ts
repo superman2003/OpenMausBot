@@ -565,7 +565,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   function uploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, session: string, spec: Spec): Promise<string[]> {
     const chrome = chromeTarget(session, spec);
     const folder = boxed && !chrome ? join(browserProfileDirectory(session), "omb-uploads") : join(DATA_DIR, "browser-uploads");
-    return namedUploadPaths(files, folder, Date.now(), { everyFile: boxed || Boolean(chrome) });
+    const localWindowsBrowser = DESKTOP_MANAGED && process.platform === "win32" && !boxed && !attachesToChrome(spec.env);
+    return namedUploadPaths(files, folder, Date.now(), { everyFile: boxed || Boolean(chrome), limitSize: !localWindowsBrowser });
   }
   /** The saved sign-ins of a bot's or a shared profile's browser, for one audience. */
   async function signedInSitesTarget(which: BrowserSitesRef, audience: Audience = "team"): Promise<BrowserSitesTarget | { status: number; error: string }> {

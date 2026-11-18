@@ -50,7 +50,7 @@ export function uploadableFiles(files: unknown, roots: readonly string[]): { fil
 /** Chrome names an uploaded file after its file on disk and reads it only when the form is sent, so an attachment stored
  * under a random id gets a copy with the person's own name that outlives the call. `everyFile`: stage every file in
  * `folder`, outside the bot's writable workspace. */
-export async function namedUploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, folder: string, now = Date.now(), { everyFile = false } = {}): Promise<string[]> {
+export async function namedUploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, folder: string, now = Date.now(), { everyFile = false, limitSize = true } = {}): Promise<string[]> {
   sweepNamedCopies(folder, now);
   const created: string[] = [];
   const opened: Array<{ input: number; size: number }> = [];
@@ -59,10 +59,10 @@ export async function namedUploadPaths(files: ReadonlyArray<{ file: string; name
     const prepared = files.map(({ file, name: given }) => {
       const name = given && basename(given) === given ? given : everyFile ? basename(file) : null;
       if (!name || (name === basename(file) && !everyFile)) return { file };
-      const source = openUpload(file);
+      const source = openUpload(file, limitSize);
       opened.push(source);
       total += source.size;
-      if (total > BROWSER_UPLOAD_MAX_BYTES) throw new BrowserUploadRefusal("Uploads are limited to 100 MiB per batch.");
+      if (limitSize && total > BROWSER_UPLOAD_MAX_BYTES) throw new BrowserUploadRefusal("Uploads are limited to 100 MiB per batch.");
       return { file, name, source };
     });
     const paths: string[] = [];
@@ -84,7 +84,7 @@ export async function namedUploadPaths(files: ReadonlyArray<{ file: string; name
   }
 }
 
-function openUpload(source: string): { input: number; size: number } {
+function openUpload(source: string, limitSize: boolean): { input: number; size: number } {
   // Windows has no O_NOFOLLOW: there the copy is read from the path the allowlist just checked, before any wait.
   const flags = process.platform === "win32" ? constants.O_RDONLY
     : constants.O_RDONLY | constants.O_NONBLOCK | (process.platform === "darwin" ? O_NOFOLLOW_ANY : constants.O_NOFOLLOW);
@@ -93,7 +93,7 @@ function openUpload(source: string): { input: number; size: number } {
     if (process.platform === "linux" && readlinkSync(`/proc/self/fd/${input}`) !== source) throw new BrowserUploadRefusal(`${source} changed while staging the upload.`);
     const file = fstatSync(input, { bigint: true });
     if (!file.isFile()) throw new BrowserUploadRefusal(`${source} is not a file.`);
-    if (file.size > BigInt(FILE_MAX_BYTES)) throw new BrowserUploadRefusal(`Uploads are limited to ${limitMegabytes(FILE_MAX_BYTES)} MiB per file.`);
+    if (limitSize && file.size > BigInt(FILE_MAX_BYTES)) throw new BrowserUploadRefusal(`Uploads are limited to ${limitMegabytes(FILE_MAX_BYTES)} MiB per file.`);
     return { input, size: Number(file.size) };
   } catch (error) {
     closeSync(input);

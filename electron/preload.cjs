@@ -370,6 +370,12 @@ const bridge = {
       return "";
     }
   },
+  ...(isLocalPage && localOrigin && process.platform === "win32" && !desktopRemoteClient && process.argv.includes("--omb-company-desktop=1") ? {
+    pickBrowserFiles: (address, multiple = false, accept = "") => {
+      if (typeof address !== "string" || typeof accept !== "string") return Promise.reject(new Error("Invalid browser file picker."));
+      return invokeWithPlainError("browser:pick-files", address, multiple === true, accept);
+    },
+  } : {}),
   /** No screen field: macOS 15+ caches that status per process, so it would lie after a grant. */
   permStatus: () => ipcRenderer.invoke("perm:status"),
   permRequestMic: () => ipcRenderer.invoke("perm:request-mic"),

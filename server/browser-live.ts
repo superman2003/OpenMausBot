@@ -36,7 +36,6 @@ export const INPUT_BATCH_LIMIT = 64;
 const ENDED_PROBE = { timeoutMs: 5_000, maxBytes: 65_536 };
 /** What a view hears when its browser closed unused: it stops, where reconnecting would start the browser again. */
 export const BROWSER_ASLEEP_ERROR = { type: "error", retryable: false, asleep: true, message: "This browser closed after it sat unused, to save memory. Reconnect to open it again." };
-/** What a view hears while its browser cannot show it yet; it keeps waiting. */
 export const BROWSER_WAITING = { type: "waiting", reason: "busy" };
 
 export class BrowserLiveError extends Error {
@@ -53,14 +52,12 @@ export class BrowserActionFailedError extends BrowserLiveError {
   }
 }
 
-/** Another command, usually the bot's own, holds the session; not a missing engine. */
 export class BrowserBusyError extends BrowserLiveError {
   constructor(message = "The browser is busy with another action and did not answer in time. Try again shortly.") {
     super(message, 503); this.name = "BrowserBusyError";
   }
 }
 
-/** The engine left a status read unanswered with no bot or person working in it: it hung, and its session is being reset. */
 class BrowserUnresponsiveError extends BrowserLiveError {
   constructor() { super("The browser stopped responding, so it is being restarted. The live view reconnects by itself.", 503); this.name = "BrowserUnresponsiveError"; Object.assign(this, userErrorFields(userError("serverError.browser.restartingUnresponsive"))); }
 }
@@ -260,7 +257,6 @@ interface OpenOptions {
   res: ServerResponse;
   /** The id of the view this panel had before its stream dropped: that view, if the server still has it open, is replaced. */
   resume?: string | null;
-  /** The panel's size in CSS pixels, which the page fills from the start. */
   size?: PageSize | null;
   filePicker?: boolean;
 }
@@ -319,7 +315,6 @@ export class BrowserLive {
   private readonly clocks = new Map<string, HoldClock>();
   private readonly holdLimits: HoldLimits;
   private readonly sessionResets = new Map<string, Promise<boolean>>();
-  /** Each watched browser's page dialogs, and the views that watch them. */
   private readonly dialogs = new Map<string, { watch: DialogWatch; views: Set<string> }>();
   private readonly devTools?: BrowserLiveDevTools;
   private readonly turnHolds: (session: string) => boolean;
@@ -363,7 +358,6 @@ export class BrowserLive {
    * `controlling` when it is the view their hold is used from and their input runs now. */
   private control(session: string): void {
     const holder = this.runtime.heldBy(session) ?? null;
-    // A hold that ended, whichever way, leaves nothing behind for the next one.
     if (holder === null) this.forgetHold(session);
     let driver: Viewer | undefined;
     for (const viewer of this.viewers.values()) {
@@ -409,7 +403,6 @@ export class BrowserLive {
     try { this.release(viewer); } catch { this.close(viewer); }
   }
 
-  /** Lets upstream send its next frame while the view has room for it. */
   private release(viewer: Viewer): void {
     if (viewer.frameSeq === undefined || viewer.unacked.size >= FRAME_WINDOW) return;
     this.sendSocket(viewer, { type: "ack", seq: viewer.frameSeq });
@@ -460,12 +453,10 @@ export class BrowserLive {
     void this.runtime.pageSizes.resize(session, latest ? { width: latest.width, height: latest.height } : null, fresh).catch(() => undefined);
   }
 
-  /** Its person holds the browser, from this view or another of theirs. */
   private ownedBy(viewer: Viewer): boolean {
     return this.runtime.heldBy(viewer.session) === viewer.person;
   }
 
-  /** It is the view its person's hold is used from, and their input runs now. */
   private controlling(viewer: Viewer): boolean {
     return this.drivers.get(viewer.session) === viewer.id && this.runtime.canControl(viewer.session, viewer.person);
   }
@@ -486,11 +477,6 @@ export class BrowserLive {
     return clock;
   }
 
-  /**
-   * A view of the person holding the browser went. What it pressed is let go once its input on the way has run. If its
-   * stream dropped while it was still theirs, the hold carries on in their other views, or waits the grace for their next
-   * one. A view closed on purpose, or no longer theirs (signed out, switched away), ends a hold no view of theirs has.
-   */
   private leave(viewer: Viewer, dropped: boolean): void {
     const session = viewer.session;
     const used = this.drivers.get(session) === viewer.id;
@@ -515,7 +501,6 @@ export class BrowserLive {
     this.clock(session).watched(open);
   }
 
-  /** The person's hold ends as a hand-back does, once what their view that dropped pressed is let go. */
   private end(session: string, person: string): void {
     const left = this.left.get(session);
     const finish = () => {
@@ -600,7 +585,6 @@ export class BrowserLive {
     }
   }
 
-  /** Discards the session's daemon once; connecting waits for it, then starts a fresh one. */
   private resetSession(viewer: Viewer, why: string): boolean {
     if (!this.current(viewer) || this.turnHolds(viewer.session)) return false;
     if (this.sessionResets.has(viewer.session)) return true;
@@ -783,7 +767,6 @@ export class BrowserLive {
   }
 
   async open(options: OpenOptions): Promise<void> {
-    // The view this panel had before its stream dropped, if the server still has it open, never comes back.
     const replaced = options.resume ? this.viewers.get(options.resume) : undefined;
     if (replaced && replaced.owner === options.owner && replaced.botId === options.botId) this.close(replaced, true, true);
     if (this.viewers.size >= 8 || [...this.viewers.values()].filter((v) => v.session === options.session).length >= 2) {
@@ -801,7 +784,6 @@ export class BrowserLive {
     try {
       const port = await this.connectWhenFree(viewer);
       if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
-      // Before its frames flow: the person's next view carries on with their hold, after a dropped stream or a reopened app.
       await this.carryOn(viewer);
       if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
       viewer.port = port;
