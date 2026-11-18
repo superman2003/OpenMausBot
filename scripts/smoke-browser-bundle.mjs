@@ -305,8 +305,9 @@ try {
   gate = await openGate({ decide: (target, addresses) => refusalFor(target, addresses, rules) });
   const windowsLauncher = target === "win32-x64" && engineVersionExpected === WINDOWS_VENDOR_VERSION;
   const launcherUa = "OpenMausBot Windows launcher (local, fixture)";
-    const videoPath = join(fixture, "local-video.mp4");
+  const videoPath = join(fixture, "local-video.mp4");
   const videoSize = 100 * 1024 * 1024 + 17;
+  let video;
   let launcher;
   if (windowsLauncher) {
     const { windowsLauncherPath, writeWindowsLauncher } = await import("../server/browser/chrome/wrapper.ts");
@@ -354,7 +355,7 @@ try {
     const position = (await alpha.tool("agent_browser_eval", { script: "(() => { const r = document.querySelector('#pick-video').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()" })).data.result;
     await writeFile(videoPath, "");
     await truncate(videoPath, videoSize);
-    const video = await realpath(videoPath);
+    video = await realpath(videoPath);
     phase = "Windows video file picker";
     const { verifyBrowserFilePicker } = await import("./testing/smoke-browser-file-picker.ts");
     const before = await ownedDaemonPid(alpha);
