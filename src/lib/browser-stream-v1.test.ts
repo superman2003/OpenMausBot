@@ -40,6 +40,28 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("the v1 view of one conversation's browser", () => {
+  it("hands the controlling view's picker to the shared file UI and clears only its matching offer", () => {
+    const onFileChooser = vi.fn();
+    const client = createLiveStreamClient("scout", events({ onFileChooser }), vi.fn(), { viewer: "" }, { threadId: "ada-chat" });
+    try {
+      const source = FixtureEventSource.instances[0]!;
+      expect(source.url).toBe("/api/bots/scout/browser/live?filePicker=1&threadId=ada-chat");
+      source.emit("ready", { viewerId: "v-1" });
+      const offer = { id: "picker", multiple: false, accept: "video/*" };
+      source.emit("fileChooser", offer);
+      expect(onFileChooser).not.toHaveBeenCalled();
+      source.emit("control", { held: true, owned: true, controlling: true });
+      source.emit("fileChooser", offer);
+      expect(onFileChooser).toHaveBeenCalledWith({ multiple: false, accept: "video/*", uploadUrl: "/api/bots/scout/browser/upload?chooser=picker&threadId=ada-chat", credentials: true });
+      source.emit("fileChooserClosed", { id: "old-picker" });
+      expect(onFileChooser).toHaveBeenCalledOnce();
+      source.emit("fileChooserClosed", { id: "picker" });
+      expect(onFileChooser).toHaveBeenLastCalledWith(null);
+    } finally {
+      client.stop();
+    }
+  });
+
   it("asks for that conversation's browser on a Team Cloud, and for the bot's own browser elsewhere", () => {
     createLiveStreamClient("scout", events(), vi.fn(), { viewer: "" }, { threadId: "ada-chat" });
     createLiveStreamClient("scout", events(), vi.fn(), { viewer: "v-1" }, { threadId: "ada-chat" });

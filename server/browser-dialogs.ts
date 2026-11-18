@@ -2,6 +2,7 @@
 // headless Chrome, which holds every input to that page until it is answered. A second DevTools client sees and answers
 // it; it must enable the Page domain before the dialog opens, since a page blocked by one answers nothing.
 import { connectCdp, type Cdp, type CdpListeners } from "./browser-sites.ts";
+import { LiveFilePicker } from "./browser-live-file-picker.ts";
 
 export interface PageDialog {
   type: "confirm" | "prompt";
@@ -20,18 +21,22 @@ type Open = { session: string; dialog: PageDialog } | null;
 /** One browser's open page dialog, watched over its own DevTools connection. */
 export class DialogWatch {
   readonly #onChange: (dialog: PageDialog | null) => void;
+  readonly #filePickers: boolean;
   #cdp: Cdp | null = null;
   #open: Open = null;
   #waiters = new Set<() => void>();
   #closed = false;
   #opened = 0;
+  #filePicker?: LiveFilePicker;
 
-  constructor(onChange: (dialog: PageDialog | null) => void) {
+  constructor(onChange: (dialog: PageDialog | null) => void, filePickers = false) {
     this.#onChange = onChange;
+    this.#filePickers = filePickers;
   }
 
   get dialog(): PageDialog | null { return this.#open?.dialog ?? null; }
   get closed(): boolean { return this.#closed; }
+  get filePicker(): LiveFilePicker | undefined { return this.#filePicker; }
   /** How many dialogs have opened since the watch began. */
   get opened(): number { return this.#opened; }
 
@@ -49,11 +54,13 @@ export class DialogWatch {
         } else if ((method === "Page.javascriptDialogClosed" || method === "Target.detachedFromTarget") && this.#open && (sessionId ?? params?.sessionId) === this.#open.session) {
           this.#set(null);
         }
+        void this.#filePicker?.event({ method, params, sessionId });
       },
       closed: () => this.close(),
     });
     if (this.#closed) { cdp.close(); return; }
     this.#cdp = cdp;
+    if (this.#filePickers) this.#filePicker = new LiveFilePicker(cdp);
     await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
   }
 
@@ -89,6 +96,8 @@ export class DialogWatch {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#filePicker?.close();
+    this.#filePicker = undefined;
     this.#cdp?.close();
     this.#cdp = null;
     this.#set(null);

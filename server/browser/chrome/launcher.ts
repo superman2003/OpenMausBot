@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { userInfo } from "node:os";
 
 import { browserEngineStatus } from "../../browser-engine.ts";
+import { AGENT_BROWSER_WINDOWS_VERSION } from "../../browser-engine-release.ts";
 import { attachesToChrome, ownsBrowserViewport, type BrowserLaunch } from "../../browser-runtime.ts";
 import { DATA_DIR } from "../../config.ts";
 import { augmentedPath } from "../../env-path.ts";
@@ -14,7 +15,7 @@ import { needsNoSandbox, type ChromeIdentity } from "./identity.ts";
 import { installChromeForTesting, type ChromeForTestingPin, type DownloadProgress } from "./install.ts";
 import { chromeHost, installedGoogleChrome, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
 import { IdentitySidecars } from "./sidecar.ts";
-import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, writeLauncher, type LauncherBox, type LauncherSettings, type Screen } from "./wrapper.ts";
+import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, windowsLauncherPath, writeLauncher, writeWindowsLauncher, type LauncherBox, type LauncherSettings, type Screen } from "./wrapper.ts";
 
 type Ready = { kind: "ready"; chrome: FoundChrome; identity: ChromeIdentity; product: string; fingerprint: string; launcher?: LauncherSettings };
 type State =
@@ -74,8 +75,9 @@ export interface ChromeLauncherOptions {
 }
 
 export class ChromeLauncher implements BrowserLaunch {
-  /** The executable agent-browser is given; the same path for every browser this data dir starts. */
+  /** The shell launcher for Unix and for external Windows engines. */
   readonly path: string;
+  private readonly windowsPath?: string;
   private state: State = { kind: "idle" };
   private preparing: Promise<void> | null = null;
   private screen: Promise<Screen> | null = null;
@@ -93,6 +95,7 @@ export class ChromeLauncher implements BrowserLaunch {
     this.host = options.host ?? chromeHost({ dataDir: options.dataDir, env, platform, arch: options.arch });
     this.sidecars = options.sidecars ?? new IdentitySidecars();
     this.path = launcherPath(options.dataDir, platform);
+    if (platform === "win32") this.windowsPath = windowsLauncherPath(options.dataDir);
   }
 
   /** Every Chrome started from now on runs in the box this returns (a Team Cloud's); the launcher is written again. */
@@ -100,7 +103,7 @@ export class ChromeLauncher implements BrowserLaunch {
     this.box = box;
     if (this.state.kind === "ready" && this.state.launcher) {
       const launcher = { ...this.state.launcher, ...this.boxed() };
-      writeLauncher(this.path, launcher, this.options.platform);
+      this.writeLaunchers(launcher);
       this.state = { ...this.state, launcher };
     }
   }
@@ -110,10 +113,19 @@ export class ChromeLauncher implements BrowserLaunch {
     return box ? { box } : {};
   }
 
+  private engine(): ChromeEngine | null {
+    return this.options.engine ? this.options.engine() : this.managedEngine();
+  }
+
+  private writeLaunchers(launcher: LauncherSettings): void {
+    writeLauncher(this.path, launcher, this.options.platform);
+    if (this.windowsPath) writeWindowsLauncher(this.windowsPath, launcher);
+  }
+
   plan(): ChromePlan {
     // Once a download has started, a browser agent-browser's PATH shows later must not switch a session's launcher.
     const downloading = this.state.kind === "preparing" || this.state.kind === "downloading";
-    return resolveChromePlan(this.host, this.options.engine ? this.options.engine() : this.managedEngine(), { downloading });
+    return resolveChromePlan(this.host, this.engine(), { downloading });
   }
 
   /** agent-browser runs its own headless shell, which many sites refuse, only because no Google Chrome is installed here. */
@@ -136,12 +148,13 @@ export class ChromeLauncher implements BrowserLaunch {
   }
 
   /** What agent-browser's environment gains: nothing while the engine keeps its own browser. */
-  env(): Record<string, string> {
+  env(engineVersion = this.engine()?.version): Record<string, string> {
     if (this.state.kind === "failed" || this.plan().kind === "legacy") return {};
     void this.prepare();
     this.followTimeZone();
     this.followLanguage();
-    return { AGENT_BROWSER_EXECUTABLE_PATH: this.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" };
+    const executable = this.windowsPath && engineVersion === AGENT_BROWSER_WINDOWS_VERSION ? this.windowsPath : this.path;
+    return { AGENT_BROWSER_EXECUTABLE_PATH: executable, AGENT_BROWSER_HIDE_SCROLLBARS: "0" };
   }
 
   /** The owner's app can give a Cloud its time zone at any time (server/time-zone.ts): the next Chrome this starts tells
@@ -153,7 +166,7 @@ export class ChromeLauncher implements BrowserLaunch {
     if (timeZone === state.launcher.timeZone) return;
     const launcher = { ...state.launcher, timeZone };
     try {
-      writeLauncher(this.path, launcher, this.options.platform);
+      this.writeLaunchers(launcher);
       this.state = { ...state, launcher };
       this.log(`browser: the next browser started tells time in ${timeZone ?? "the system's zone"}`);
     } catch (error) {
@@ -168,7 +181,7 @@ export class ChromeLauncher implements BrowserLaunch {
     if (language === state.launcher.language) return;
     const launcher = { ...state.launcher, language };
     try {
-      writeLauncher(this.path, launcher, this.options.platform);
+      this.writeLaunchers(launcher);
       this.state = { ...state, launcher };
       this.log(`browser: the next browser started uses ${language ?? "the system's language"}`);
     } catch (error) {
@@ -245,7 +258,8 @@ export class ChromeLauncher implements BrowserLaunch {
   }
 
   private uses(spec: LaunchSpec): boolean {
-    return spec.env?.AGENT_BROWSER_EXECUTABLE_PATH === this.path && !attachesToChrome(spec.env);
+    const path = spec.env?.AGENT_BROWSER_EXECUTABLE_PATH;
+    return path !== undefined && (path === this.path || path === this.windowsPath) && !attachesToChrome(spec.env ?? {});
   }
 
   private fresh(state: Ready): boolean {
@@ -277,7 +291,7 @@ export class ChromeLauncher implements BrowserLaunch {
         ...(platform === "darwin" ? { home: userInfo().homedir } : {}),
         ...this.boxed(),
       };
-      writeLauncher(this.path, launcher, platform);
+      this.writeLaunchers(launcher);
       if (platform !== "win32") await (this.options.checkLauncher ?? runsLauncher)(this.path, this.chromeEnv());
     }
     return { kind: "ready", chrome, identity: { userAgent: identity.userAgent, userAgentMetadata: identity.userAgentMetadata }, product: identity.product, fingerprint: chromeFingerprint(chrome.path), ...(launcher ? { launcher } : {}) };
@@ -330,7 +344,7 @@ export class ChromeLauncher implements BrowserLaunch {
 
   private managedEngine(): ChromeEngine | null {
     const status = browserEngineStatus({ dataDir: this.options.dataDir, env: this.options.env, platform: this.options.platform, arch: this.options.arch });
-    return status.kind === "ready" ? { managed: status.managed } : null;
+    return status.kind === "ready" ? { managed: status.managed, version: status.version } : null;
   }
 
   private engineBrowser(): string {

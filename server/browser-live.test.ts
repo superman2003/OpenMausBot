@@ -94,9 +94,9 @@ beforeEach(() => {
 });
 afterEach(() => { live.closeAll(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
-async function open({ botId = "bot-a", session = "profile-a", owner = "admin-a", current = () => true, resume, size }: { botId?: string; session?: string; owner?: string; current?: () => boolean; resume?: string; size?: { width: number; height: number } } = {}) {
+async function open({ botId = "bot-a", session = "profile-a", owner = "admin-a", current = () => true, resume, size, filePicker }: { botId?: string; session?: string; owner?: string; current?: () => boolean; resume?: string; size?: { width: number; height: number }; filePicker?: boolean } = {}) {
   const res = new ResponseFixture();
-  await live.open({ botId, session, owner, isCurrent: current, res: res as unknown as ServerResponse, ...(resume ? { resume } : {}), ...(size ? { size } : {}),
+  await live.open({ botId, session, owner, isCurrent: current, res: res as unknown as ServerResponse, ...(resume ? { resume } : {}), ...(size ? { size } : {}), filePicker,
     spec: { command: "/trusted/agent-browser", args: ["mcp", "--tools", "core"], env: { AGENT_BROWSER_SESSION: session, AGENT_BROWSER_SOCKET_DIR: "/isolated/socket" } } });
   return { res, socket: SocketFixture.instances.at(-1)!, action: (body: unknown) => live.action({ viewerId: res.id, botId, owner, body }) };
 }
@@ -768,6 +768,7 @@ describe("authenticated browser viewer relay", () => {
         send: vi.fn(async (method: string, params?: Record<string, unknown>, sessionId?: string) => {
           sent.push({ method, params, sessionId });
           if (method === "Page.handleJavaScriptDialog") { answered(); listeners.event?.({ method: "Page.javascriptDialogClosed", params: {}, sessionId }); }
+          if (method === "DOM.describeNode") return { node: { attributes: ["type", "file", "accept", "video/*"] } };
           return {};
         }),
         close: vi.fn(),
@@ -778,6 +779,39 @@ describe("authenticated browser viewer relay", () => {
       return { sent, cdp, url, connect, emit, answer };
     }
     const confirm = { type: "confirm", message: "Leave this page?", defaultPrompt: "" };
+
+    it("offers a video picker to its controller, attaches files, and invalidates an offer on navigation or hand-back", async () => {
+      const tools = devTools();
+      live = new BrowserLive({ runtime, devTools: { url: tools.url, connect: tools.connect, filePickers: true } });
+      const a = await open({ filePicker: true });
+      const b = await open({ botId: "bot-b", owner: "admin-b", filePicker: true });
+      tools.emit("Target.attachedToTarget", { sessionId: "page-1", targetInfo: { type: "page" } });
+      await a.action({ type: "take" });
+      expect(tools.sent).toContainEqual({ method: "Page.setInterceptFileChooserDialog", params: { enabled: true }, sessionId: "page-1" });
+
+      const choose = async () => {
+        const count = a.res.events("fileChooser").length;
+        tools.emit("Page.fileChooserOpened", { frameId: "frame-1", backendNodeId: 17, mode: "selectSingle" }, "page-1");
+        await vi.waitFor(() => expect(a.res.events("fileChooser")).toHaveLength(count + 1));
+        return a.res.events("fileChooser").at(-1);
+      };
+      const picker = await choose();
+      expect(picker).toMatchObject({ multiple: false, accept: "video/*" });
+      expect(b.res.events("fileChooser")).toHaveLength(0);
+      await expect(live.answerFileChooser("profile-a", "admin-b", picker.id, ["/upload/clip.mp4"])).resolves.toBe(false);
+      await expect(live.answerFileChooser("profile-a", "admin-a", picker.id, ["/upload/clip.mp4"])).resolves.toBe(true);
+      expect(tools.sent).toContainEqual({ method: "DOM.setFileInputFiles", params: { backendNodeId: 17, files: ["/upload/clip.mp4"] }, sessionId: "page-1" });
+      expect(a.res.events("fileChooserClosed")).toContainEqual({ id: picker.id });
+
+      const navigated = await choose();
+      tools.emit("Page.frameNavigated", { frame: { id: "frame-1" } }, "page-1");
+      expect(live.fileChooserOffered("profile-a", "admin-a", navigated.id)).toBe(false);
+      const handedBack = await choose();
+      await a.action({ type: "release" });
+      expect(live.fileChooserOffered("profile-a", "admin-a", handedBack.id)).toBe(false);
+      expect(tools.sent).toContainEqual({ method: "Page.setInterceptFileChooserDialog", params: { enabled: false }, sessionId: "page-1" });
+      expect(nativeClose).not.toHaveBeenCalled();
+    });
 
     it("shows the page's question to the view holding the browser, not to another, and its answer lets the input it held through", async () => {
       const tools = devTools();
@@ -1219,6 +1253,23 @@ describe("opening a view while the bot holds the browser", () => {
     vi.useFakeTimers();
     execute.mockRejectedValueOnce(busy()).mockResolvedValue(output(ready));
     const { res, opening } = start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await opening;
+    expect(types(res).slice(0, 2)).toEqual(["waiting", "ready"]);
+    expect(nativeClose).not.toHaveBeenCalled();
+  });
+
+  it("reconnects between browser calls without restarting the active turn's browser", async () => {
+    vi.useFakeTimers();
+    vi.mocked(runtime.working).mockReturnValue(false);
+    live = new BrowserLive({ runtime, turnHolds: (session) => session === "profile-a" });
+    const first = await open();
+    first.socket.close();
+    execute.mockRejectedValueOnce(busy()).mockResolvedValue(output(ready));
+    const { res, opening } = start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(res.events("waiting")).toEqual([{ reason: "busy" }]);
+    expect(nativeClose).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1_000);
     await opening;
     expect(types(res).slice(0, 2)).toEqual(["waiting", "ready"]);

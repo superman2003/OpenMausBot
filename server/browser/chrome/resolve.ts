@@ -39,6 +39,7 @@ export interface ChromeHost {
 export interface ChromeEngine {
   /** The agent-browser OMB installed and manages; an engine someone named picks its own browser unless a Chrome is named too. */
   managed: boolean;
+  version?: string;
 }
 
 const MAC_CHROME_BINARY = "Contents/MacOS/Google Chrome";

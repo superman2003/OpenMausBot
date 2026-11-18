@@ -297,7 +297,7 @@ type SessionSpec = { session: string; spec: { command: string; args?: readonly s
 
 /**
  * BrowserLive's API: a viewer of a new-engine session gets the v1 adapter, every other the agent-browser one. The v2
- * stream, its file pickers and its downloads exist on the new engine only.
+ * stream and its downloads exist on the new engine only.
  */
 export class LiveRouter {
   readonly #old: BrowserLive;
@@ -329,11 +329,11 @@ export class LiveRouter {
   }
 
   fileChooserOffered({ session, spec }: SessionSpec, owner: string, chooserId: string): boolean {
-    return chromeTarget(session, spec) ? this.#chrome.service.fileChooserOffered(session, owner, chooserId) : false;
+    return chromeTarget(session, spec) ? this.#chrome.service.fileChooserOffered(session, owner, chooserId) : this.#old.fileChooserOffered(session, owner, chooserId);
   }
 
   answerFileChooser({ session, spec }: SessionSpec, owner: string, chooserId: string, paths: readonly string[]): Promise<boolean> {
-    return chromeTarget(session, spec) ? this.#chrome.service.answerFileChooser(session, owner, chooserId, paths) : Promise.resolve(false);
+    return chromeTarget(session, spec) ? this.#chrome.service.answerFileChooser(session, owner, chooserId, paths) : this.#old.answerFileChooser(session, owner, chooserId, paths);
   }
 
   download({ session, spec }: SessionSpec, id: string): Download | undefined {

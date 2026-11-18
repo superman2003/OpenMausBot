@@ -283,6 +283,8 @@ try {
     response.end(`<!doctype html><html><head><title>${title}</title></head><body>
       <h1>${title}</h1><label for="message">Test message</label><input id="message">
       <button id="submit" onclick="document.getElementById('result').textContent=document.getElementById('message').value">Show message</button>
+      <input id="video" type="file" accept="video/mp4" hidden>
+      <button id="pick-video" onclick="document.getElementById('video').click()">Choose video</button>
       <p id="result">Waiting</p></body></html>`);
   });
   server.listen(0, "127.0.0.1");
@@ -294,11 +296,21 @@ try {
   const { refusalFor } = await import("../server/browser/egress/policy.ts");
   const rules = { host: "desktop", ownPort: () => false, botPort: async () => false, localNetwork: true, allowed: () => false };
   gate = await openGate({ decide: (target, addresses) => refusalFor(target, addresses, rules) });
+  const windowsLauncher = target === "win32-x64" && engineVersionExpected === WINDOWS_VENDOR_VERSION;
+  const launcherUa = "OpenMausBot Windows launcher (local, fixture)";
+  let launcher;
+  if (windowsLauncher) {
+    const { windowsLauncherPath, writeWindowsLauncher } = await import("../server/browser/chrome/wrapper.ts");
+    const path = windowsLauncherPath(env.OMB_DATA_DIR);
+    writeWindowsLauncher(path, { chrome: paths.chrome, userAgent: launcherUa, screen: { width: 1280, height: 720 } });
+    launcher = { AGENT_BROWSER_EXECUTABLE_PATH: path };
+  }
   for (const name of ["alpha", "beta"]) {
     const integration = agentBrowserIntegration({ binaryPath: status.binaryPath,
       session: `omb-${name[0]}-${randomBytes(4).toString("hex")}`,
-      encryptionKey: randomBytes(32).toString("hex"), persistent: false, env, egressPort: gate.port });
-    assert.equal(resolve(integration.env.AGENT_BROWSER_EXECUTABLE_PATH ?? ""), resolve(paths.chrome), "MCP did not receive bundled Chromium");
+      encryptionKey: randomBytes(32).toString("hex"), persistent: false, env, egressPort: gate.port, launcher });
+    const executable = launcher?.AGENT_BROWSER_EXECUTABLE_PATH ?? paths.chrome;
+    assert.equal(resolve(integration.env.AGENT_BROWSER_EXECUTABLE_PATH ?? ""), resolve(executable), "MCP did not receive the bundled browser launch settings");
     assert.equal(integration.env.AGENT_BROWSER_RESTORE_SAVE, "never");
     // Use the production preparation path. Guest preparation creates only
     // managed config; it must not prewarm a daemon and mask cold-start bugs.
@@ -315,9 +327,30 @@ try {
   }
   const [alpha, beta] = clients;
   assert.equal((await alpha.tool("agent_browser_get_title")).data.title, title);
+  if (windowsLauncher) {
+    phase = "Windows direct browser launch";
+    const pid = await ownedDaemonPid(alpha);
+    const powershell = join(env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+    const direct = await run(powershell, ["-NoProfile", "-NonInteractive", "-Command",
+      "$chrome = Get-CimInstance Win32_Process -Filter ('ParentProcessId = ' + [uint32]$env:OMB_SMOKE_DAEMON_PID)"
+        + " | Where-Object { $_.ExecutablePath -eq $env:OMB_SMOKE_CHROME }; [bool]$chrome"],
+    { ...env, OMB_SMOKE_DAEMON_PID: String(pid), OMB_SMOKE_CHROME: paths.chrome });
+    assert.equal(direct, "True", "The daemon must start Chrome directly without a command interpreter");
+    assert.equal((await alpha.tool("agent_browser_eval", { script: "navigator.userAgent" })).data.result, launcherUa);
+  }
   await alpha.tool("agent_browser_fill", { selector: "#message", text: "Bundled browser works" });
   await alpha.tool("agent_browser_click", { selector: "#submit" });
   assert.equal((await alpha.tool("agent_browser_get_text", { selector: "#result" })).data.text, "Bundled browser works");
+  if (windowsLauncher) {
+    const position = (await alpha.tool("agent_browser_eval", { script: "(() => { const r = document.querySelector('#pick-video').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()" })).data.result;
+    phase = "Windows video file picker";
+    const { verifyBrowserFilePicker } = await import("./testing/smoke-browser-file-picker.ts");
+    const before = await ownedDaemonPid(alpha);
+    await verifyBrowserFilePicker({ spec: { ...alpha.integration, env: { ...env, ...alpha.integration.env } }, dataDir: env.OMB_DATA_DIR, button: position,
+      readFiles: async () => (await alpha.tool("agent_browser_eval", { script: "({ draft: document.querySelector('#message').value, files: Array.from(document.querySelector('#video').files, f => ({ name: f.name, size: f.size })) })" })).data.result,
+    });
+    assert.equal(await ownedDaemonPid(alpha), before, "Choosing a video must not restart the browser");
+  }
   // The harness reads, sizes and pictures a bot's browser over the engine's own
   // loopback relay: page health, step evidence, preview frames and login typing.
   phase = "relay contract";
@@ -368,7 +401,7 @@ try {
   assert(image?.data, "MCP did not return the screenshot image to the agent");
   const screenshotInfo = pngInfo(await readFile(screenshotPath));
   assert.deepEqual(pngInfo(Buffer.from(image.data, "base64")), screenshotInfo, "MCP image differs from screenshot file");
-  report = { ok: true, target, engineMode: values["engine-candidate"] ? "vendor-candidate" : "packaged", engineVersion, chromeVersion, checks: ["fresh-home auto-discovery", "real MCP cold-start navigation", "title", "input and click", "loopback relay reads, ref box and screenshot", "same-MCP close and reopen", "PNG screenshot after restart", "two-bot cookie and localStorage isolation"], screenshot: screenshotInfo };
+  report = { ok: true, target, engineMode: values["engine-candidate"] ? "vendor-candidate" : "packaged", engineVersion, chromeVersion, checks: ["fresh-home auto-discovery", "real MCP cold-start navigation", "title", "input and click", "loopback relay reads, ref box and screenshot", "same-MCP close and reopen", "PNG screenshot after restart", "two-bot cookie and localStorage isolation", ...(windowsLauncher ? ["direct Windows Chrome launch and literal launcher arguments", "video file picker cancel and upload without restarting"] : [])], screenshot: screenshotInfo };
 } catch (error) {
   failure = error;
   try { await failureDiagnostics(); } catch (diagnosticError) {
@@ -393,7 +426,10 @@ finally {
   process.removeListener("SIGINT", interrupt);
   process.removeListener("SIGTERM", interrupt);
   if (cleanupErrors.length) failure = new Error(`${failure?.message ?? "Browser test passed"}; browser cleanup failed, isolated fixture retained at ${fixture}: ${cleanupErrors.join("; ")}`);
-  else await rm(fixture, { recursive: true, force: true });
+  else {
+    try { await rm(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 }); }
+    catch (error) { failure = new Error("Could not remove the isolated browser fixture", { cause: error }); }
+  }
 }
 if (failure) { console.error(failure.stack ?? failure); process.exitCode = 1; }
 else console.log(JSON.stringify({ ...report, cleanup: "owned browsers, local HTTP server, and isolated home removed" }, null, 2));

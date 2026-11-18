@@ -1,6 +1,6 @@
 // agent-browser runs AGENT_BROWSER_EXECUTABLE_PATH with its own arguments. It splits AGENT_BROWSER_ARGS at commas (0.37),
 // which cut the user agent at "(KHTML,", so the identity flags ride a generated launcher instead: a shell script that execs
-// Chrome (same process, same pid), or on Windows a batch file, which Rust's Command runs through cmd.exe.
+// Chrome (same process, same pid), or a JSON launcher read by OpenMausBot's Windows vendor build.
 import { execFile } from "node:child_process";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -48,6 +48,15 @@ export function launcherFlags(settings: LauncherSettings, platform: NodeJS.Platf
 
 export function launcherPath(dataDir: string, platform: NodeJS.Platform = process.platform): string {
   return join(dataDir, "browser", platform === "win32" ? "chrome-launcher.cmd" : "chrome-launcher.sh");
+}
+
+export function windowsLauncherPath(dataDir: string): string {
+  return join(dataDir, "browser", "chrome-launcher.json");
+}
+
+export function writeWindowsLauncher(path: string, settings: LauncherSettings): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileAtomic(path, JSON.stringify({ chrome: settings.chrome, args: launcherFlags(settings, "win32") }), { mode: 0o700 });
 }
 
 export function shellQuote(value: string): string {

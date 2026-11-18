@@ -262,6 +262,7 @@ interface OpenOptions {
   resume?: string | null;
   /** The panel's size in CSS pixels, which the page fills from the start. */
   size?: PageSize | null;
+  filePicker?: boolean;
 }
 interface Viewer extends OpenOptions {
   id: string;
@@ -303,6 +304,7 @@ interface Left {
 
 /** How a view reaches its browser's DevTools, to watch the page's own dialogs: without it, they are not watched. */
 export interface BrowserLiveDevTools {
+  filePickers?: boolean;
   /** The browser's DevTools address, from its daemon's stream port. */
   url(port: number): Promise<unknown>;
   connect?: (url: string, timeoutMs: number, listeners: CdpListeners) => Promise<Cdp>;
@@ -320,11 +322,13 @@ export class BrowserLive {
   /** Each watched browser's page dialogs, and the views that watch them. */
   private readonly dialogs = new Map<string, { watch: DialogWatch; views: Set<string> }>();
   private readonly devTools?: BrowserLiveDevTools;
+  private readonly turnHolds: (session: string) => boolean;
   private order = 0;
-  constructor({ runtime, devTools, holdLimits = HOLD_LIMITS }: { runtime: BrowserRuntime; devTools?: BrowserLiveDevTools; holdLimits?: HoldLimits }) {
+  constructor({ runtime, devTools, holdLimits = HOLD_LIMITS, turnHolds = () => false }: { runtime: BrowserRuntime; devTools?: BrowserLiveDevTools; holdLimits?: HoldLimits; turnHolds?: (session: string) => boolean }) {
     this.runtime = runtime;
     this.devTools = devTools;
     this.holdLimits = holdLimits;
+    this.turnHolds = turnHolds;
     runtime.onIdleClose((session) => this.asleep(session));
   }
 
@@ -361,6 +365,7 @@ export class BrowserLive {
     const holder = this.runtime.heldBy(session) ?? null;
     // A hold that ended, whichever way, leaves nothing behind for the next one.
     if (holder === null) this.forgetHold(session);
+    let driver: Viewer | undefined;
     for (const viewer of this.viewers.values()) {
       if (viewer.session !== session) continue;
       const hidden = holder !== null && holder !== viewer.person;
@@ -374,12 +379,16 @@ export class BrowserLive {
       }
       // Like its frames, the page's question is withheld from views while another person holds the browser.
       const dialog = hidden ? null : this.dialogs.get(session)?.watch.dialog ?? null;
-      this.send(viewer, { type: "control", held: holder !== null, owned: holder !== null && !hidden, controlling: this.controlling(viewer), ...(dialog ? { dialog } : {}) });
+      const controlling = this.controlling(viewer);
+      this.send(viewer, { type: "control", held: holder !== null, owned: holder !== null && !hidden, controlling, ...(dialog ? { dialog } : {}) });
       if (!hidden && viewer.hiddenFrame) {
         const frame = viewer.hiddenFrame; viewer.hiddenFrame = undefined;
         this.frame(viewer, frame);
       }
+      if (controlling && viewer.filePicker && this.current(viewer)) driver = viewer;
     }
+    const view = driver;
+    this.dialogs.get(session)?.watch.filePicker?.control(view && { id: view.id, send: (event) => this.send(view, event) });
   }
 
   private frame(viewer: Viewer, frame: ObjectValue): void {
@@ -583,7 +592,7 @@ export class BrowserLive {
       console.warn("browser-live:", error);
       if (browserLaunchFailure(error)) {
         // A daemon holding a launch config Chrome cannot satisfy here (headed, no display) fails every command until killed, so discard the session once.
-        this.resetSession(viewer, "a failed browser launch");
+        if (!this.resetSession(viewer, "a failed browser launch")) throw new BrowserBusyError();
         throw new BrowserLiveError("The browser could not start on this server. Reconnect to retry with a fresh browser session.", 503);
       }
       if (person && engineAnsweredFailure(error)) throw new BrowserActionFailedError(args);
@@ -592,8 +601,9 @@ export class BrowserLive {
   }
 
   /** Discards the session's daemon once; connecting waits for it, then starts a fresh one. */
-  private resetSession(viewer: Viewer, why: string): void {
-    if (this.sessionResets.has(viewer.session)) return;
+  private resetSession(viewer: Viewer, why: string): boolean {
+    if (!this.current(viewer) || this.turnHolds(viewer.session)) return false;
+    if (this.sessionResets.has(viewer.session)) return true;
     const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
     const reset = closeBrowserSession(viewer.spec.command, env).then((closed) => {
       if (closed) console.warn(`browser-live: reset ${viewer.session} after ${why}; reconnecting starts a fresh session`);
@@ -602,6 +612,7 @@ export class BrowserLive {
     }, () => false);
     this.sessionResets.set(viewer.session, reset);
     void reset.finally(() => { if (this.sessionResets.get(viewer.session) === reset) this.sessionResets.delete(viewer.session); });
+    return true;
   }
 
   private async connect(viewer: Viewer): Promise<number> {
@@ -615,9 +626,8 @@ export class BrowserLive {
     let status: ObjectValue;
     try { status = await this.command(viewer, ["stream", "status"], STATUS_PROBE_MS); }
     catch (error) {
-      // Only a bot call or a person's action can hold the engine past this read; with neither, it has hung.
       if (!(error instanceof BrowserBusyError) || this.runtime.working(viewer.session)) throw error;
-      this.resetSession(viewer, "a status read the browser never answered");
+      if (!this.resetSession(viewer, "a status read the browser never answered")) throw error;
       throw new BrowserUnresponsiveError();
     }
     if (status.enabled !== true) {
@@ -738,7 +748,7 @@ export class BrowserLive {
     const url = localDevToolsUrl(await devTools.url(port).catch(() => null));
     if (join() || !url || !this.current(viewer)) return;
     const session = viewer.session;
-    const watch = new DialogWatch(() => this.control(session));
+    const watch = new DialogWatch(() => this.control(session), devTools.filePickers);
     this.dialogs.set(session, { watch, views: new Set([viewer.id]) });
     await watch.start(url, devTools.connect).catch(() => watch.close());
   }
@@ -752,7 +762,7 @@ export class BrowserLive {
 
   /** The person's browser stopped answering an input: restarted for them, on the same profile, and every view reconnects. */
   private async restartUnresponsive(viewer: Viewer): Promise<boolean> {
-    if (viewer.restarting) return false;
+    if (viewer.restarting || this.turnHolds(viewer.session)) return false;
     viewer.restarting = true;
     try {
       await this.runtime.restart(viewer.session, viewer.person, async () => {
@@ -928,6 +938,7 @@ export class BrowserLive {
     let refused = false;
     try {
       await this.runtime.withHumanAction(viewer.session, viewer.person, async () => {
+        await this.dialogs.get(viewer.session)?.watch.filePicker?.ready();
         if (!this.current(viewer)) throw new BrowserLiveError("This browser view closed.", 409);
         const take = async (message: ObjectValue) => {
           try { await this.input(viewer, message); }
@@ -951,6 +962,20 @@ export class BrowserLive {
       if (viewer.closed && viewer.pendingActions === 0) viewer.idle?.();
       this.control(viewer.session);
     }
+  }
+
+  fileChooserOffered(session: string, owner: string, chooserId: string): boolean {
+    const viewer = this.viewers.get(this.drivers.get(session) ?? "");
+    return !!viewer && viewer.owner === owner && this.current(viewer) && this.controlling(viewer)
+      && this.dialogs.get(session)?.watch.filePicker?.offered(viewer.id, chooserId) === true;
+  }
+
+  async answerFileChooser(session: string, owner: string, chooserId: string, paths: readonly string[]): Promise<boolean> {
+    const viewer = this.viewers.get(this.drivers.get(session) ?? "");
+    const picker = this.dialogs.get(session)?.watch.filePicker;
+    if (!viewer || !picker || !this.fileChooserOffered(session, owner, chooserId)) return false;
+    this.clock(session).used();
+    return this.runtime.withHumanAction(session, viewer.person, () => picker.answer(viewer.id, chooserId, paths));
   }
 
   private refusal(viewer: Viewer, otherwise: string): BrowserLiveError {

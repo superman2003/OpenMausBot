@@ -3,6 +3,7 @@ import { tmpdir, userInfo } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
+import { AGENT_BROWSER_WINDOWS_VERSION } from "../../browser-engine-release.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import type { ChromeIdentity } from "./identity.ts";
 import { chromeForTestingExecutable, chromeForTestingPin, type installChromeForTesting } from "./install.ts";
@@ -61,6 +62,26 @@ function launcher(machine: ReturnType<typeof mac>, overrides: Partial<Constructo
 const headless = (path: string) => ({ command: "/engine/agent-browser", env: { AGENT_BROWSER_EXECUTABLE_PATH: path, AGENT_BROWSER_HEADLESS: "1" } });
 
 describe("the Chrome launcher", () => {
+  it("gives the bundled Windows engine launch settings that keep Chrome's executable and arguments distinct", async () => {
+    const machine = mac();
+    const executable = join(machine.root, "Chrome 100%.exe");
+    writeFileSync(executable, "fixture");
+    const env = { ...machine.env, OMB_CHROME_PATH: executable };
+    const chrome = launcher(machine, {
+      platform: "win32", env, host: { ...machine.host, platform: "win32", env },
+      engine: () => ({ managed: true, version: AGENT_BROWSER_WINDOWS_VERSION }), language: () => "en",
+    });
+    const spec = { command: "agent-browser.exe", env: chrome.env() };
+    const manifest = spec.env.AGENT_BROWSER_EXECUTABLE_PATH!;
+    expect(manifest).toMatch(/chrome-launcher\.json$/u);
+    await chrome.ready(spec);
+    expect(JSON.parse(readFileSync(manifest, "utf8"))).toMatchObject({
+      chrome: executable,
+      args: expect.arrayContaining([expect.stringContaining("(KHTML, like Gecko)"), "--screen-info={1440x900}", "--lang=en"]),
+    });
+    expect(chrome.env("0.36.0-omb.1").AGENT_BROWSER_EXECUTABLE_PATH).toBe(chrome.path);
+  });
+
   it("gives agent-browser a launcher for the installed Google Chrome, with the identity read from that binary", async () => {
     const machine = mac();
     const calibrate = vi.fn(async () => identity("155"));

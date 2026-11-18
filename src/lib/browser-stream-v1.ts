@@ -179,6 +179,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
   let closed = false;
   let source: EventSource | null = null;
   let viewerId = "";
+  let fileChooser: string | null = null;
   let heardAt = 0;
   let attempts = 0;
   let generation = 0;
@@ -197,6 +198,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     const wasConnected = viewerId !== "";
     if (wasConnected) resume.viewer = viewerId;
     viewerId = "";
+    fileChooser = null;
     control = null;
     queue.clear();
     if (wasConnected) events.onConnectedChange(false);
@@ -243,6 +245,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
     retry = null;
     if (stopped) return;
     const params = new URLSearchParams(resume.viewer ? { resume: resume.viewer } : {});
+    if (events.onFileChooser) params.set("filePicker", "1");
     const opening = size;
     if (size) {
       params.set("width", String(Math.round(size.width)));
@@ -296,6 +299,18 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
       if (control && next.controller === control.controller && next.owned === control.owned && JSON.stringify(next.dialog) === JSON.stringify(control.dialog)) return;
       control = next.controller === control?.controller ? next : liveControl(data, ++generation);
       events.onControl?.(control);
+    });
+    listen("fileChooser", ({ id, multiple, accept }) => {
+      if (!viewerId || control?.controller !== "you" || typeof id !== "string"
+        || typeof multiple !== "boolean" || typeof accept !== "string") return;
+      fileChooser = id;
+      const path = `/api/bots/${encodeURIComponent(botId)}/browser/upload?${new URLSearchParams({ chooser: id })}`;
+      events.onFileChooser?.({ multiple, accept, uploadUrl: withBrowserScope(path, scope), credentials: true });
+    });
+    listen("fileChooserClosed", ({ id }) => {
+      if (typeof id !== "string" || fileChooser !== id) return;
+      fileChooser = null;
+      events.onFileChooser?.(null);
     });
     live.addEventListener("error", (event) => {
       if (source !== live) return;

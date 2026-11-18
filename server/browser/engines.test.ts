@@ -29,7 +29,7 @@ function engines(options: RuntimeRouterOptions = {}) {
     close: vi.fn(async () => undefined),
     closeAll: vi.fn(async () => undefined),
   };
-  const oldLive = { open: vi.fn(async () => undefined), action: vi.fn(async () => "agent-browser"), handBack: vi.fn(), closeForSession: vi.fn(), closeForOwner: vi.fn(), closeForBot: vi.fn(), closeAll: vi.fn() };
+  const oldLive = { open: vi.fn(async () => undefined), action: vi.fn(async () => "agent-browser"), fileChooserOffered: vi.fn(() => false), answerFileChooser: vi.fn(async () => false), handBack: vi.fn(), closeForSession: vi.fn(), closeForOwner: vi.fn(), closeForBot: vi.fn(), closeAll: vi.fn() };
   const chrome = {
     service: {
       agentRpc: vi.fn(async (_target: unknown, _method: string, _params: unknown, beforeDispatch?: () => void) => { beforeDispatch?.(); return "chrome"; }),

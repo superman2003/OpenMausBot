@@ -59,8 +59,9 @@ unless a Chrome is named too.
 **Identity.** The chosen Chrome reports exactly what it reports headed, read
 from the binary itself once per version: its own user agent without
 "HeadlessChrome", and its own client hints (brands, full version list,
-platform version, architecture). agent-browser runs a generated launcher
-(`browser/chrome-launcher.sh`, `.cmd` on Windows) that adds
+platform version, architecture). agent-browser launches Chrome with settings from
+`browser/chrome-launcher.sh` on Unix or `browser/chrome-launcher.json` on bundled
+Windows. The launcher adds
 `--disable-blink-features=AutomationControlled`, that user agent, the primary
 display's size and, when OMB knows it, the language; on a server it also
 passes the server's `TZ`. A bot's Chrome never touches the person's keychain
@@ -318,13 +319,9 @@ browser updater in the desktop bundle.
 Windows uses an explicitly identified OpenMausBot build of agent-browser
 0.36.0, with the handle-inheritance fix from
 [upstream PR #1781](https://github.com/vercel-labs/agent-browser/pull/1781).
-The official 0.37.0 release does not contain this fix, so Windows stays on the
-native-verified `0.36.0-omb.1` revision and does not yet get the new recording
-options. Do not replace it with the unpatched 0.37.0 Windows binary.
-The original binary can hang when a newly started background browser holds
-the tool call's output connection open. The backport changes that Windows
-startup behavior; it does not include the PR's broader output-reader rewrite
-or unrelated changes from upstream main.
+The `0.36.0-omb.3` revision keeps the background browser from holding the
+tool call's output connection open. It also reads the Windows launch settings
+and starts Chrome directly with `CREATE_NO_WINDOW`.
 
 The artifact-only **Windows browser vendor build** workflow builds the pinned
 source and checked-in patch, retains the licenses and build provenance, and

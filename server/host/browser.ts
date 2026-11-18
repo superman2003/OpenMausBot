@@ -114,10 +114,14 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   // Where turns wait for room (a self-hosted server under its pids limit), a new browser also waits for room for its
   // processes. `runs` is read only when a browser call asks, after usedBrowserSessions exists.
   const processRoom = deps.engineMemory?.selfHosted?.() ? processBudget.browserRoom((session) => browserRunning(session, usedBrowserSessions.get(session))) : null;
-  // Only a bot waiting for a slot closes a browser a running turn holds; the idle sweep below never does.
+  const turnHoldsBrowser = (session: string) => !turnResources.free(`browser:${session}`);
   const browserRoom = new BrowserRoom({
     max: deps.browsersAtOnce ?? (() => defaultBrowserRoomSize()),
-    spare: (session) => spareForRoom(agentBrowserRuntime.spare(session), { holds: !turnResources.free(`browser:${session}`), idleMs: idleMs() }),
+    spare: (session) => {
+      const holds = turnHoldsBrowser(session);
+      if (DESKTOP_MANAGED && holds) return null;
+      return spareForRoom(agentBrowserRuntime.spare(session), { holds, idleMs: idleMs() });
+    },
     close: (session) => agentBrowserRuntime.closeIfIdle(session, 1),
     ...(processRoom ? { admit: (session: string) => processRoom.enter(session) } : {}),
   });
@@ -143,7 +147,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const browserBox = deps.browserBox;
   const boxed = Boolean(browserBox?.(LAUNCHER_SECCOMP_FD, []));
   if (browserBox) chromeLauncher.boxWith(() => browserBox(LAUNCHER_SECCOMP_FD, []));
-  const agentBrowserLive = new BrowserLive({ runtime: agentBrowserRuntime, devTools: {
+  const agentBrowserLive = new BrowserLive({ runtime: agentBrowserRuntime, turnHolds: turnHoldsBrowser, devTools: {
+    filePickers: DESKTOP_MANAGED && process.platform === "win32",
     url: (port) => relay(port, { action: "cdp_url" }, { timeoutMs: 5_000, maxBytes: 65_536 }).then((answer) => answer.data?.cdpUrl),
   } });
   const host: HostKind = DESKTOP_MANAGED ? "desktop" : CLOUD_HOME || existsSync("/.dockerenv") ? "container" : "server";
@@ -155,7 +160,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
     language: deps.language,
-    held: (session) => !turnResources.free(`browser:${session}`),
+    held: turnHoldsBrowser,
     log: (line) => console.warn(line),
   });
   const lendRefusal = deps.lendRefusal ?? ((): LendRefusal => "unproven");
@@ -256,7 +261,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     engine: () => { const engine = browserEngineStatus(); return engine.kind === "ready" ? engine.binaryPath : null; },
     owns: (session) => belongs(session) || (Boolean(CLOUD_HOME) && BOT_SESSION.test(session)),
     live: (session) => usedBrowserSessions.has(session) && belongs(session),
-    held: (session) => !turnResources.free(`browser:${session}`),
+    held: turnHoldsBrowser,
     closeIdle: (session) => browserRuntime.closeIfIdle(session, idleMs(), usedBrowserSessions.get(session)),
   });
   // A browser that has ended keeps no loopback listener: its gate opens again with it, on the same port where it can, and
@@ -264,7 +269,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const releaseGates = () => releaseEndedGates({ sessions: () => browserEgress.sessions(), release: async (session) => { usedBrowserSessions.delete(session); await browserEgress.release(session); },
     env: (session) => { const spec = usedBrowserSessions.get(session); return spec && !chromeTarget(session, spec) ? spec.env : null; },
     running: (session) => browserRunning(session, usedBrowserSessions.get(session)),
-    inUse: (session) => !turnResources.free(`browser:${session}`) || agentBrowserRuntime.working(session) });
+    inUse: (session) => turnHoldsBrowser(session) || agentBrowserRuntime.working(session) });
   let gateTimer: ReturnType<typeof setInterval> | undefined;
   const browserSweep = {
     start() {

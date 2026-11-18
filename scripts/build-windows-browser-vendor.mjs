@@ -9,9 +9,11 @@ import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { executableTarget } from "./prepare-cloudflared.mjs";
 import { bundleInventory, releaseBytes } from "./prepare-browser.mjs";
+import { AGENT_BROWSER_WINDOWS_VERSION } from "../server/browser-engine-release.ts";
 
-export const WINDOWS_VENDOR_VERSION = "0.36.0-omb.2";
+export const WINDOWS_VENDOR_VERSION = AGENT_BROWSER_WINDOWS_VERSION;
 export const WINDOWS_VENDOR_TARGET = "x86_64-pc-windows-gnu";
+export const WINDOWS_VENDOR_NATIVE_TARGET = "x86_64-pc-windows-msvc";
 export const WINDOWS_VENDOR_SOURCE = {
   commit: "eb05921bad874cd2a1b4fa5d1149f1ed26576cae",
   asset: "agent-browser-eb05921bad874cd2a1b4fa5d1149f1ed26576cae.tar.gz",
@@ -19,7 +21,7 @@ export const WINDOWS_VENDOR_SOURCE = {
   bytes: 1904718,
   sha256: "ed24a72a5260d9c1ea454cd849c44159bac570a6939ac645e4c5bdb98a421646",
 };
-export const WINDOWS_VENDOR_PATCH_SHA256 = "a08f3fdfca63db5358c5354716e4216c365d1d37c08b5f32215062f937c35819";
+export const WINDOWS_VENDOR_PATCH_SHA256 = "1effd70af2c7918eebfb656bdc8e93577f2e4a2cc589366b18b2448da696f39d";
 export const WINDOWS_VENDOR_RUST = "1.97.1";
 export const WINDOWS_VENDOR_PNPM = "11.1.3";
 const repository = fileURLToPath(new URL("../", import.meta.url));
@@ -42,7 +44,7 @@ export function verifyVendorPatch(bytes) {
 // integrity, not publication approval; normal packaging never uses this path.
 export function verifyVendorCandidate(provenance, bytes) {
   assert.equal(provenance.version, WINDOWS_VENDOR_VERSION);
-  assert.equal(provenance.target, WINDOWS_VENDOR_TARGET);
+  assert([WINDOWS_VENDOR_TARGET, WINDOWS_VENDOR_NATIVE_TARGET].includes(provenance.target), "Unexpected Windows vendor build target");
   assert.deepEqual(provenance.source, WINDOWS_VENDOR_SOURCE);
   assert.equal(provenance.patch.sha256, WINDOWS_VENDOR_PATCH_SHA256);
   assert.equal(provenance.executable.asset, "agent-browser-win32-x64.exe");
@@ -52,7 +54,7 @@ export function verifyVendorCandidate(provenance, bytes) {
 
 function command(file, args, cwd, { input, capture = false } = {}) {
   const result = spawnSync(file, args, {
-    cwd, input, encoding: "utf8", timeout: 30 * 60_000,
+    cwd, input, encoding: "utf8", timeout: 30 * 60_000, maxBuffer: 16 * 1024 * 1024,
     stdio: capture || input !== undefined ? ["pipe", "pipe", "pipe"] : "inherit",
     env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1", CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: "x86_64-w64-mingw32-gcc" },
   });
@@ -61,16 +63,23 @@ function command(file, args, cwd, { input, capture = false } = {}) {
 }
 
 export async function buildWindowsBrowserVendor(output) {
-  assert.equal(process.platform, "linux", "Build this dependency on the reviewed Linux GNU cross-compiler runner");
-  assert.equal(process.arch, "x64", "The reviewed build runner is Linux x64");
+  const native = process.platform === "win32";
+  assert(native || process.platform === "linux", "The Windows vendor build needs a Windows or Linux host");
+  assert.equal(process.arch, "x64", "The Windows vendor build needs an x64 host");
+  const target = native ? WINDOWS_VENDOR_NATIVE_TARGET : WINDOWS_VENDOR_TARGET;
+  const pnpmCli = process.env.OMB_VENDOR_PNPM_CLI;
+  assert(!native || (pnpmCli && isAbsolute(pnpmCli)), "Set OMB_VENDOR_PNPM_CLI to the absolute path of the pinned pnpm CLI on Windows");
+  const runPnpm = (args, cwd, options) => native
+    ? command(process.execPath, [pnpmCli, ...args], cwd, options)
+    : command("pnpm", args, cwd, options);
   assert(Number(process.versions.node.split(".")[0]) >= 24, "Node 24 or later is required");
   assert(isAbsolute(output) && !existsSync(output), "Output must be a new absolute directory; existing artifacts are never overwritten");
   const patch = readFileSync(patchPath);
   verifyVendorPatch(patch);
   const rust = command("rustc", ["--version"], repository, { capture: true });
   const cargo = command("cargo", ["--version"], repository, { capture: true });
-  const mingw = command("x86_64-w64-mingw32-gcc", ["--version"], repository, { capture: true }).split("\n")[0];
-  const linker = command("x86_64-w64-mingw32-ld", ["--version"], repository, { capture: true }).split("\n")[0];
+  const mingw = native ? null : command("x86_64-w64-mingw32-gcc", ["--version"], repository, { capture: true }).split("\n")[0];
+  const linker = native ? "MSVC" : command("x86_64-w64-mingw32-ld", ["--version"], repository, { capture: true }).split("\n")[0];
   assert(rust.startsWith(`rustc ${WINDOWS_VENDOR_RUST} `), `Expected Rust ${WINDOWS_VENDOR_RUST}, got ${rust}`);
   assert(cargo.startsWith(`cargo ${WINDOWS_VENDOR_RUST} `), `Expected Cargo ${WINDOWS_VENDOR_RUST}, got ${cargo}`);
   const scratch = mkdtempSync(join(tmpdir(), "omb-browser-vendor-"));
@@ -78,26 +87,27 @@ export async function buildWindowsBrowserVendor(output) {
     const source = join(scratch, "source");
     mkdirSync(source);
     const archive = join(scratch, WINDOWS_VENDOR_SOURCE.asset);
-    writeFileSync(archive, await releaseBytes(WINDOWS_VENDOR_SOURCE));
+    writeFileSync(archive, await releaseBytes(WINDOWS_VENDOR_SOURCE, process.env.OMB_BROWSER_ARCHIVE_DIR));
     command("tar", ["-xzf", archive, "--strip-components=1", "-C", source], scratch);
     command("git", ["apply", "--check", "-"], source, { input: patch });
     command("git", ["apply", "--whitespace=error-all", "-"], source, { input: patch });
-    const pnpm = command("pnpm", ["--version"], source, { capture: true });
+    const pnpm = runPnpm(["--version"], source, { capture: true });
     assert.equal(pnpm, WINDOWS_VENDOR_PNPM, `Expected pnpm ${WINDOWS_VENDOR_PNPM}`);
     // Keep the real upstream dashboard: build.rs otherwise silently embeds a
     // placeholder. The frozen pnpm lock and Cargo --locked retain dependencies.
-    command("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"], source);
-    command("pnpm", ["--filter", "dashboard", "build"], source);
+    runPnpm(["install", "--frozen-lockfile", "--ignore-scripts"], source);
+    runPnpm(["--filter", "dashboard", "build"], source);
     const dashboard = join(source, "packages/dashboard/out");
     assert(!readFileSync(join(dashboard, "index.html"), "utf8").includes("Dashboard not built"));
-    command("cargo", ["build", "--locked", "--release", "--manifest-path", "cli/Cargo.toml", "--target", WINDOWS_VENDOR_TARGET], source);
-    const binary = join(source, "cli/target", WINDOWS_VENDOR_TARGET, "release/agent-browser.exe");
+    command("cargo", ["build", "--locked", "--release", "--manifest-path", "cli/Cargo.toml", "--target", target], source);
+    const targetDirectory = resolve(source, process.env.CARGO_TARGET_DIR ?? "cli/target");
+    const binary = join(targetDirectory, target, "release/agent-browser.exe");
     const bytes = readFileSync(binary);
     assert.equal(executableTarget(bytes), "win32-x64", "Vendor build did not produce a Windows x64 executable");
     mkdirSync(output, { recursive: true });
     const asset = "agent-browser-win32-x64.exe";
     copyFileSync(binary, join(output, asset));
-    const testArtifacts = command("cargo", ["test", "--bin", "agent-browser", "--locked", "--release", "--no-run", "--message-format=json", "--manifest-path", "cli/Cargo.toml", "--target", WINDOWS_VENDOR_TARGET], source, { capture: true })
+    const testArtifacts = command("cargo", ["test", "--bin", "agent-browser", "--locked", "--release", "--no-run", "--message-format=json", "--manifest-path", "cli/Cargo.toml", "--target", target], source, { capture: true })
       .split("\n").map((line) => JSON.parse(line)).filter((entry) => entry.reason === "compiler-artifact" && entry.profile?.test && entry.executable);
     assert.equal(testArtifacts.length, 1, "Expected one native vendor regression-test binary");
     copyFileSync(testArtifacts[0].executable, join(output, "agent-browser-tests.exe"));
@@ -109,9 +119,9 @@ export async function buildWindowsBrowserVendor(output) {
     copyFileSync(patchPath, join(output, "agent-browser-windows-stdio.patch"));
     copyFileSync(join(repository, "third_party/browser/README.md"), join(output, "README.md"));
     const provenance = {
-      schemaVersion: 1, version: WINDOWS_VENDOR_VERSION, target: WINDOWS_VENDOR_TARGET,
+      schemaVersion: 1, version: WINDOWS_VENDOR_VERSION, target,
       source: WINDOWS_VENDOR_SOURCE,
-      patch: { upstream: "https://github.com/vercel-labs/agent-browser/pull/1781", commit: "81a98c349d04195396ffae6898bd375ad64280de", sha256: WINDOWS_VENDOR_PATCH_SHA256, scope: "Windows handle inheritance and console-free Chrome children; no MCP reader rewrite" },
+      patch: { upstream: "https://github.com/vercel-labs/agent-browser/pull/1781", commit: "81a98c349d04195396ffae6898bd375ad64280de", sha256: WINDOWS_VENDOR_PATCH_SHA256, scope: "Windows handle inheritance and direct Chrome launch without a console" },
       toolchain: { rust, cargo, pnpm, node: process.version, mingw, linker },
       cargoLockSha256: digest(readFileSync(join(source, "cli/Cargo.lock"))),
       pnpmLockSha256: digest(readFileSync(join(source, "pnpm-lock.yaml"))),

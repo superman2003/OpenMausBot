@@ -1,12 +1,11 @@
-OpenMausBot Windows vendor revision 0.36.0-omb.2.
+OpenMausBot Windows vendor revision 0.36.0-omb.3.
 Base: vercel-labs/agent-browser eb05921bad874cd2a1b4fa5d1149f1ed26576cae.
-Carries the Windows handle-inheritance fix from upstream PR1781,
-commit 81a98c349d04195396ffae6898bd375ad64280de, and CREATE_NO_WINDOW
-for Chrome children with a native Windows regression test.
-The MCP output-reader rewrite is not included.
+Includes the Windows handle-inheritance fix from upstream PR1781,
+commit 81a98c349d04195396ffae6898bd375ad64280de, and OpenMausBot's
+direct Chrome launcher with CREATE_NO_WINDOW and a native regression test.
 
 diff --git a/cli/Cargo.lock b/cli/Cargo.lock
-index c33ca2a..69a189d 100644
+index c33ca2a..12612be 100644
 --- a/cli/Cargo.lock
 +++ b/cli/Cargo.lock
 @@ -45,7 +45,7 @@ dependencies = [
@@ -14,12 +13,12 @@ index c33ca2a..69a189d 100644
  [[package]]
  name = "agent-browser"
 -version = "0.36.0"
-+version = "0.36.0-omb.2"
++version = "0.36.0-omb.3"
  dependencies = [
   "aes-gcm",
   "async-trait",
 diff --git a/cli/Cargo.toml b/cli/Cargo.toml
-index 2e151ed..112cb80 100644
+index 2e151ed..a51dd96 100644
 --- a/cli/Cargo.toml
 +++ b/cli/Cargo.toml
 @@ -1,6 +1,7 @@
@@ -27,7 +26,7 @@ index 2e151ed..112cb80 100644
  [package]
  name = "agent-browser"
 -version = "0.36.0"
-+version = "0.36.0-omb.2"
++version = "0.36.0-omb.3"
  edition = "2021"
  description = "Fast browser automation CLI for AI agents"
  license = "Apache-2.0"
@@ -97,15 +96,15 @@ index 2a0d82f..80fdce2 100644
      }
  
 diff --git a/cli/src/native/cdp/chrome.rs b/cli/src/native/cdp/chrome.rs
-index 864e8c6..0cd569d 100644
+index 864e8c6..f7d5447 100644
 --- a/cli/src/native/cdp/chrome.rs
 +++ b/cli/src/native/cdp/chrome.rs
 @@ -1,3 +1,4 @@
-+// Modified by OpenMausBot: prevent Windows console windows for Chrome children.
++// Modified by OpenMausBot: launch Chrome directly on Windows without a console.
  use std::io::{BufRead, BufReader, Write};
  use std::path::{Path, PathBuf};
  use std::process::{Child, Command, Stdio};
-@@ -418,6 +419,17 @@ impl Default for LaunchOptions {
+@@ -418,6 +419,44 @@ impl Default for LaunchOptions {
      }
  }
  
@@ -120,19 +119,59 @@ index 864e8c6..0cd569d 100644
 +    command
 +}
 +
++#[cfg(windows)]
++#[derive(serde::Deserialize)]
++struct WindowsChromeLauncher {
++    chrome: PathBuf,
++    args: Vec<String>,
++}
++
++#[cfg(windows)]
++fn windows_chrome_command(path: &Path, args: Vec<String>) -> Result<Command, String> {
++    if path.file_name() != Some(std::ffi::OsStr::new("chrome-launcher.json")) {
++        let mut command = chrome_command(path.as_os_str());
++        command.args(args);
++        return Ok(command);
++    }
++    let bytes = std::fs::read(path).map_err(|error| format!("Cannot read Chrome launcher: {error}"))?;
++    let launcher: WindowsChromeLauncher =
++        serde_json::from_slice(&bytes).map_err(|error| format!("Invalid Chrome launcher: {error}"))?;
++    if !launcher.chrome.is_absolute()
++        || !launcher.chrome.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
++    {
++        return Err("The Windows Chrome launcher requires an absolute executable path".into());
++    }
++    let mut command = chrome_command(launcher.chrome.as_os_str());
++    command.args(args).args(launcher.args);
++    Ok(command)
++}
++
  struct ChromeArgs {
      args: Vec<String>,
      user_data_dir: PathBuf,
-@@ -819,7 +831,7 @@ fn try_launch_chrome(chrome_path: &Path, options: &LaunchOptions) -> Result<Chro
+@@ -819,9 +858,18 @@ fn try_launch_chrome(chrome_path: &Path, options: &LaunchOptions) -> Result<Chro
      #[cfg(target_os = "linux")]
      let xvfb = maybe_start_xvfb(options);
  
 -    let mut cmd = Command::new(chrome_path);
-+    let mut cmd = chrome_command(chrome_path.as_os_str());
-     cmd.args(&args)
-         .stdin(Stdio::null())
+-    cmd.args(&args)
+-        .stdin(Stdio::null())
++    #[cfg(windows)]
++    let mut cmd = windows_chrome_command(chrome_path, args).map_err(|error| {
++        cleanup_temp_dir(&temp_user_data_dir);
++        error
++    })?;
++    #[cfg(not(windows))]
++    let mut cmd = {
++        let mut command = chrome_command(chrome_path.as_os_str());
++        command.args(args);
++        command
++    };
++    cmd.stdin(Stdio::null())
          .stdout(Stdio::null())
-@@ -1732,6 +1744,29 @@ fn expand_tilde(path: &str) -> String {
+         .stderr(Stdio::piped());
+ 
+@@ -1732,6 +1780,38 @@ fn expand_tilde(path: &str) -> String {
  
  #[cfg(test)]
  mod tests {
@@ -146,11 +185,20 @@ index 864e8c6..0cd569d 100644
 +                fn GetConsoleWindow() -> isize;
 +            }
 +            assert_eq!(unsafe { GetConsoleWindow() }, 0, "Chrome child acquired a Windows console");
++            assert_eq!(std::env::var(PROBE).unwrap(), "1");
 +            return;
 +        }
++        let fixture = tempfile::tempdir().unwrap();
 +        let executable = std::env::current_exe().unwrap();
-+        let output = super::chrome_command(executable.as_os_str())
-+            .args(["--exact", "native::cdp::chrome::tests::test_chrome_child_has_no_console", "--nocapture"])
++        let launcher = fixture.path().join("chrome-launcher.json");
++        std::fs::write(&launcher, serde_json::to_vec(&serde_json::json!({
++            "chrome": executable,
++            "args": ["--nocapture"]
++        })).unwrap()).unwrap();
++        let output = super::windows_chrome_command(&launcher, vec![
++            "--exact".into(),
++            "native::cdp::chrome::tests::test_chrome_child_has_no_console".into(),
++        ]).unwrap()
 +            .env(PROBE, "1")
 +            .stdin(std::process::Stdio::null())
 +            .output()

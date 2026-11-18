@@ -708,6 +708,20 @@ describe("a running turn's agent-browser browser", () => {
     await agentBrowser.launched("bot-mine", { command: ENGINE, env: { AGENT_BROWSER_CDP: "http://127.0.0.1:9222" } });
     expect(host.browserRoom.open).toBe(1);
   });
+
+  it("keeps a desktop task's browser open when another browser needs a slot", async () => {
+    ready();
+    const { host } = setup(undefined, { turnResources: holding(["bot-scout"]), browsersAtOnce: () => 1 });
+    expect(await host.browserRoom.enter("bot-scout", Date.now() + 1_000)).toBeNull();
+    expect(await host.browserRuntime.closeIfIdle("bot-scout", HOUR * 1_000, keepsSignIns)).toBe(false);
+    anHourLater();
+    try {
+      expect(await host.browserRoom.enter("bot-next", Date.now() + 100)).toMatch(/^1 browser is already open/);
+      expect(closedSessions()).toEqual([]);
+    } finally {
+      vi.mocked(Date.now).mockRestore();
+    }
+  });
 });
 
 const teamAudiences = (threadId: string): Audience => ({ "ada-chat": "member:p_ada", "cleo-chat": "member:p_cleo", "room-chat": "room:launch" } as Record<string, Audience>)[threadId] ?? "team";
